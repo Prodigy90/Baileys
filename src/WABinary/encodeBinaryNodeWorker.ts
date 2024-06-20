@@ -1,13 +1,7 @@
-import path from "path";
 import * as constants from "./constants";
+import { parentPort } from "worker_threads";
 import { FullJid, jidDecode } from "./jid-utils";
-import { StaticPool } from "node-worker-threads-pool";
 import type { BinaryNode, BinaryNodeCodingOptions } from "./types";
-
-const pool = new StaticPool({
-  size: 16,
-  task: path.resolve(__dirname, "encodeBinaryNodeWorker.js"),
-});
 
 export const encodeBinaryNode = (
   { tag, attrs, content }: BinaryNode,
@@ -233,32 +227,8 @@ export const encodeBinaryNode = (
     pushBytes(content);
   } else if (Array.isArray(content)) {
     writeListStart(content.length);
-    //DEPENDING ON YOUR USAGE, YOU CAN MAKE THIS LESSER
-    if (content.length > 1000) {
-      // DEPENDS ON THE NUMBER OF CPU'S YOU GOT
-      const numWorkers = 16;
-      const chunkSize = Math.ceil(content.length / numWorkers);
-      const promises = [];
-
-      for (let i = 0; i < numWorkers; i++) {
-        const chunk = content.slice(i * chunkSize, (i + 1) * chunkSize);
-        if (chunk.length === 0) continue;
-        promises.push(pool.exec({ nodes: chunk, options: opts }));
-      }
-
-      const promiseResults = await Promise.allSettled(promises);
-
-      for (const result of promiseResults) {
-        if (result.status === "fulfilled") {
-          result.value.forEach((val) => buffer.push(val));
-        } else {
-          console.error("Worker failed:", result.reason);
-        }
-      }
-    } else {
-      for (const item of content) {
-        await encodeBinaryNode(item, opts, buffer);
-      }
+    for (const item of content) {
+      await encodeBinaryNode(item, opts, buffer);
     }
   } else if (typeof content === "undefined") {
     // do nothing
@@ -270,3 +240,21 @@ export const encodeBinaryNode = (
 
   return Buffer.from(buffer);
 };
+
+parentPort.on("message", async (message) => {
+  const { nodes, options } = message;
+  const results = [];
+
+  for (const node of nodes) {
+    try {
+      // Encode the current node
+      const workerBuffer = [];
+      const encodedNode = await encodeBinaryNode(node, options, workerBuffer);
+      results.push(encodedNode);
+    } catch (error) {
+      console.error("Error encoding node:", error);
+    }
+  }
+  const mergedResult = [].concat(...results);
+  parentPort.postMessage(mergedResult);
+});
