@@ -1,19 +1,12 @@
-import path from "path";
 import * as constants from "./constants";
 import { FullJid, jidDecode } from "./jid-utils";
-import { StaticPool } from "node-worker-threads-pool";
 import type { BinaryNode, BinaryNodeCodingOptions } from "./types";
-
-const pool = new StaticPool({
-  size: 16,
-  task: path.resolve(__dirname, "encodeBinaryNodeWorker.js"),
-});
 
 export const encodeBinaryNode = (
   { tag, attrs, content }: BinaryNode,
   opts: Pick<BinaryNodeCodingOptions, "TAGS" | "TOKEN_MAP"> = constants,
   buffer: number[] = [0]
-) => {
+): number[] => {
   const { TAGS, TOKEN_MAP } = opts;
 
   const pushByte = (value: number) => buffer.push(value & 0xff);
@@ -233,32 +226,8 @@ export const encodeBinaryNode = (
     pushBytes(content);
   } else if (Array.isArray(content)) {
     writeListStart(content.length);
-    //DEPENDING ON YOUR USAGE, YOU CAN MAKE THIS LESSER
-    if (content.length > 1000) {
-      // DEPENDS ON THE NUMBER OF CPU'S YOU GOT
-      const numWorkers = 16;
-      const chunkSize = Math.ceil(content.length / numWorkers);
-      const promises = [];
-
-      for (let i = 0; i < numWorkers; i++) {
-        const chunk = content.slice(i * chunkSize, (i + 1) * chunkSize);
-        if (chunk.length === 0) continue;
-        promises.push(pool.exec({ nodes: chunk, options: opts }));
-      }
-
-      const promiseResults = await Promise.allSettled(promises);
-
-      for (const result of promiseResults) {
-        if (result.status === "fulfilled") {
-          result.value.forEach((val) => buffer.push(val));
-        } else {
-          console.error("Worker failed:", result.reason);
-        }
-      }
-    } else {
-      for (const item of content) {
-        await encodeBinaryNode(item, opts, buffer);
-      }
+    for (const item of content) {
+      encodeBinaryNode(item, opts, buffer);
     }
   } else if (typeof content === "undefined") {
     // do nothing
@@ -268,5 +237,5 @@ export const encodeBinaryNode = (
     );
   }
 
-  return Buffer.from(buffer);
+  return buffer;
 };
