@@ -1,7 +1,9 @@
+import "dotenv/config";
 import { Boom } from '@hapi/boom'
+import { MongoClient } from 'mongodb';
 import NodeCache from 'node-cache'
 import readline from 'readline'
-import makeWASocket, { AnyMessageContent, BinaryInfo, delay, DisconnectReason, downloadAndProcessHistorySyncNotification, encodeWAM, fetchLatestBaileysVersion, getAggregateVotesInPollMessage, getHistoryMsg, isJidNewsletter, makeCacheableSignalKeyStore, makeInMemoryStore, proto, useMultiFileAuthState, WAMessageContent, WAMessageKey } from '../src'
+import makeWASocket, { AnyMessageContent, BinaryInfo, delay, DisconnectReason, downloadAndProcessHistorySyncNotification, encodeWAM, fetchLatestBaileysVersion, getAggregateVotesInPollMessage, getHistoryMsg, isJidNewsletter, makeCacheableSignalKeyStore, makeInMemoryStore, makeMongoStore, proto, useMultiFileAuthState, WAMessageContent, WAMessageKey } from '../src'
 //import MAIN_LOGGER from '../src/Utils/logger'
 import open from 'open'
 import fs from 'fs'
@@ -26,12 +28,12 @@ const question = (text: string) => new Promise<string>((resolve) => rl.question(
 
 // the store maintains the data of the WA connection in memory
 // can be written out to a file & read from it
-const store = useStore ? makeInMemoryStore({ logger }) : undefined
-store?.readFromFile('./baileys_store_multi.json')
-// save every 10s
-setInterval(() => {
-	store?.writeToFile('./baileys_store_multi.json')
-}, 10_000)
+// const store = useStore ? makeInMemoryStore({ logger }) : undefined
+// store?.readFromFile('./baileys_store_multi.json')
+// // save every 10s
+// setInterval(() => {
+// 	store?.writeToFile('./baileys_store_multi.json')
+// }, 10_000)
 
 // start a connection
 const startSock = async() => {
@@ -39,6 +41,26 @@ const startSock = async() => {
 	// fetch latest version of WA Web
 	const { version, isLatest } = await fetchLatestBaileysVersion()
 	console.log(`using WA v${version.join('.')}, isLatest: ${isLatest}`)
+
+	const mongoClient = new MongoClient(process.env.MONGODB_URL as string, {
+		socketTimeoutMS: 1_00_000,
+		connectTimeoutMS: 1_00_000,
+		waitQueueTimeoutMS: 1_00_000,
+	});
+	await mongoClient.connect();
+
+	const store = useStore
+		? makeMongoStore({
+				filterChats: true,
+				logger,
+				db: mongoClient.db(process.env.USER_SESSION as string),
+				// autoDeleteStatusMessage: {
+				//   cronTime: "*/1 * * * *",
+				//   timeZone: "Asia/Kolkata",
+				// },
+				autoDeleteStatusMessage: true,
+		  })
+		: undefined;
 
 	const sock = makeWASocket({
 		version,
