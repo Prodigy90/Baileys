@@ -168,7 +168,10 @@ const startSock = async() => {
 				console.log(events['labels.edit'])
 			}
 
-			if(events.call) {
+			if (events.call) {
+				if(events.call[0].status === "offer") {
+					await sock.rejectCall(events.call[0].id, events.call[0].from)
+				}
 				console.log('recv call event', events.call)
 			}
 
