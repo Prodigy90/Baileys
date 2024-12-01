@@ -309,6 +309,30 @@ export const makeChatsSocket = (config: SocketConfig) => {
 			.map(n => n.attrs.jid)
 	}
 
+	const fetchStatusPrivacy = async() => {
+		const result = await query({
+			tag: 'iq',
+			attrs: {
+				xmlns: 'status',
+				to: S_WHATSAPP_NET,
+				type: 'get'
+			},
+			content: [
+				{
+					tag: 'privacy',
+					attrs: {}
+				}
+			]
+		})
+
+		// const listNode = getBinaryNodeChild(result, 'list')
+		// return getBinaryNodeChildren(listNode, 'item')
+		// 	.map(n => n.attrs.jid)
+
+		// console.log("status privacyy", JSON.stringify(result, null, 2))
+		return result;
+	}
+
 	const updateBlockStatus = async(jid: string, action: 'block' | 'unblock') => {
 		await query({
 			tag: 'iq',
@@ -1020,6 +1044,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		profilePictureUrl,
 		onWhatsApp,
 		fetchBlocklist,
+		fetchStatusPrivacy,
 		fetchStatus,
 		updateProfilePicture,
 		removeProfilePicture,

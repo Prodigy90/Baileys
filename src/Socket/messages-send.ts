@@ -146,7 +146,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 		const users: BinaryNode[] = []
 		jids = Array.from(new Set(jids))
-		for(let jid of jids) {
+		for (let jid of jids) {
+			if (!jid) continue
 			const user = jidDecode(jid)?.user
 			jid = jidNormalizedUser(jid)
 
