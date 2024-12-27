@@ -95,6 +95,7 @@ interface makeMySQLStoreFunc {
     jid: string,
     sock: WASocket | undefined
   ) => Promise<GroupMetadata | null>;
+  clearGroupsData: () => Promise<void>;
   fetchMessageReceipts: ({
     remoteJid,
     id
@@ -185,6 +186,9 @@ interface makeMySQLStoreFunc {
  *
  * @property {function(any): void} fromJSON -
  * Loads store data from a JSON object, effectively restoring a previous state.
+ *
+ * @property {function(any): void} clearGroupsData -
+ * Clearing all groups data for instance_id from MySQL db
  */
 
 /**
@@ -1316,6 +1320,27 @@ export function makeMySQLStore(
     }
   };
 
+  const clearGroupsData = async (): Promise<void> => {
+    try {
+      const deleteGroupsSql = `
+      DELETE FROM groups_metadata
+      WHERE instance_id = ?`;
+
+      await customQuery(deleteGroupsSql, [instance_id]);
+
+      const deleteStatusSql = `
+      DELETE FROM groups_status
+      WHERE instance_id = ?`;
+
+      await customQuery(deleteStatusSql, [instance_id]);
+
+      log.info({ instance_id }, "Groups data cleared successfully");
+    } catch (error) {
+      log.error({ error, instance_id }, "Failed to clear groups data");
+      throw error;
+    }
+  };
+  
   // const demoteUser = async (jid: string): Promise<void> => {
   //   try {
   //     const fetchGroupSql = `
@@ -1730,6 +1755,7 @@ export function makeMySQLStore(
     fetchImageUrl,
     getContactById,
     getAllContacts,
+    clearGroupsData,
     getMessageLabels,
     mostRecentMessage,
     fetchGroupMetadata,
