@@ -1292,7 +1292,7 @@ export function makeMySQLStore(
       const [rows] = await pool.query<RowDataPacket[]>(sql, [instance_id, jid]);
 
       if (rows.length > 0) {
-        const metadata: GroupMetadata = JSON.parse(rows[0].metadata);
+        const metadata: GroupMetadata = rows[0].metadata;
         return metadata;
       }
 
