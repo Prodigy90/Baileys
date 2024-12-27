@@ -1091,128 +1091,189 @@ export function makeMySQLStore(
   const fetchAllGroupsMetadata = async (
     sock: WASocket | undefined
   ): Promise<GroupMetadataResult> => {
-    if (!sock) throw new Error("WASocket is undefined");
+    const inDB = await hasGroups();
 
-    try {
-      const groups = await sock.groupFetchAllParticipating();
+    if (inDB) {
+      try {
+        const allGroupsQuery = `
+          SELECT id, subject, group_index AS groupIndex
+          FROM groups_metadata
+          WHERE instance_id = ?
+          ORDER BY group_index ASC
+        `;
 
-      const sortedGroups = Object.entries(groups).sort(([_, a], [__, b]) =>
-        (a.subject || a.id).localeCompare(b.subject || b.id)
-      );
+        const allGroupsResult = (await customQuery(allGroupsQuery, [
+          instance_id
+        ])) as [{ id: string; subject: string; groupIndex: number }[]];
 
-      const excludeIds = Array.isArray(skippedGroups)
-        ? skippedGroups
-        : [skippedGroups];
+        const adminGroupsQuery = `
+          SELECT id, subject, admin_index AS adminIndex, 
+                JSON_EXTRACT(metadata, '$.participants') AS participants
+          FROM groups_metadata
+          WHERE instance_id = ? AND is_admin = 1
+          ORDER BY admin_index ASC
+        `;
 
-      const groupMetadata: GroupMetadataEntry[] = [];
+        const adminGroupsResult = (await customQuery(adminGroupsQuery, [
+          instance_id
+        ])) as [
+          {
+            id: string;
+            subject: string;
+            adminIndex: number;
+            participants: string;
+          }[]
+        ];
 
-      const allGroups: {
-        id: string;
-        subject: string;
-        groupIndex: number;
-      }[] = [];
-      const adminGroups: {
-        id: string;
-        subject: string;
-        participants: string[];
-        adminIndex: number;
-      }[] = [];
+        const allGroups = allGroupsResult.map((group: any) => ({
+          id: group.id,
+          subject: group.subject,
+          groupIndex: group.groupIndex
+        }));
 
-      let groupIndex = 0;
-      let adminIndex = 0;
+        const adminGroups = adminGroupsResult.map((group: any) => ({
+          id: group.id,
+          subject: group.subject,
+          adminIndex: group.adminIndex,
+          participants:
+            group.participants.map((participant: any) => participant.id) || []
+        }));
 
-      for (const [id, metadata] of sortedGroups) {
-        const {
-          subject,
-          announce,
-          isCommunity,
-          participants,
-          isCommunityAnnounce
-        } = metadata;
+        return {
+          allGroups,
+          adminGroups
+        };
+      } catch (error) {
+        log.error(
+          { error },
+          "Failed to fetch groups metadata from the database"
+        );
+        throw error;
+      }
+    } else {
+      if (!sock) throw new Error("WASocket is undefined");
 
-        const admin = await isUserAdminOrSuperAdmin(participants);
+      try {
+        const groups = await sock.groupFetchAllParticipating();
 
-        if (
-          (announce && !isCommunity && isCommunityAnnounce && !admin) ||
-          excludeIds.includes(id)
-        )
-          continue;
+        const sortedGroups = Object.entries(groups).sort(([_, a], [__, b]) =>
+          (a.subject || a.id).localeCompare(b.subject || b.id)
+        );
 
-        groupIndex++;
+        const excludeIds = Array.isArray(skippedGroups)
+          ? skippedGroups
+          : [skippedGroups];
 
-        const name =
-          subject.length > 0 ? subject : `Unnamed Group ${groupIndex}`;
-        allGroups.push({ id, subject: name, groupIndex });
+        const groupMetadata: GroupMetadataEntry[] = [];
 
-        if (admin) {
-          adminIndex++;
-          const participantIds = participants.map((p) => p.id);
-          adminGroups.push({
+        const allGroups: {
+          id: string;
+          subject: string;
+          groupIndex: number;
+        }[] = [];
+        const adminGroups: {
+          id: string;
+          subject: string;
+          participants: string[];
+          adminIndex: number;
+        }[] = [];
+
+        let groupIndex = 0;
+        let adminIndex = 0;
+
+        for (const [id, metadata] of sortedGroups) {
+          const {
+            subject,
+            announce,
+            isCommunity,
+            participants,
+            isCommunityAnnounce
+          } = metadata;
+
+          const admin = await isUserAdminOrSuperAdmin(participants);
+
+          if (
+            (announce && !isCommunity && isCommunityAnnounce && !admin) ||
+            excludeIds.includes(id)
+          )
+            continue;
+
+          groupIndex++;
+
+          const name =
+            subject.length > 0 ? subject : `Unnamed Group ${groupIndex}`;
+          allGroups.push({ id, subject: name, groupIndex });
+
+          if (admin) {
+            adminIndex++;
+            const participantIds = participants.map((p) => p.id);
+            adminGroups.push({
+              id,
+              subject: name,
+              participants: participantIds,
+              adminIndex
+            });
+          }
+
+          const groupData = {
             id,
+            metadata,
+            groupIndex,
             subject: name,
-            participants: participantIds,
-            adminIndex
-          });
+            isAdmin: admin,
+            adminIndex: admin ? adminIndex : 0
+          };
+
+          groupMetadata.push(groupData);
         }
 
-        const groupData = {
-          id,
-          metadata,
-          groupIndex,
-          subject: name,
-          isAdmin: admin,
-          adminIndex: admin ? adminIndex : 0
-        };
-
-        groupMetadata.push(groupData);
-      }
-
-      const insertMetadataSql = `
+        const insertMetadataSql = `
         INSERT INTO groups_metadata (instance_id, jid, subject, is_admin, group_index, admin_index, metadata)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE is_admin = ?, metadata = ?
       `;
 
-      for (const group of groupMetadata) {
-        const metadataJson = JSON.stringify(group.metadata);
-        const { id: jid, subject, isAdmin, groupIndex, adminIndex } = group;
-        await customQuery(insertMetadataSql, [
-          instance_id,
-          jid,
-          subject,
-          isAdmin,
-          groupIndex,
-          adminIndex,
-          metadataJson,
-          isAdmin,
-          metadataJson
-        ]);
-      }
+        for (const group of groupMetadata) {
+          const metadataJson = JSON.stringify(group.metadata);
+          const { id: jid, subject, isAdmin, groupIndex, adminIndex } = group;
+          await customQuery(insertMetadataSql, [
+            instance_id,
+            jid,
+            subject,
+            isAdmin,
+            groupIndex,
+            adminIndex,
+            metadataJson,
+            isAdmin,
+            metadataJson
+          ]);
+        }
 
-      const updateGroupsStatusSql = `
+        const updateGroupsStatusSql = `
         UPDATE groups_status
         SET group_index = group_index + ?, admin_index = admin_index + ?
         WHERE instance_id = ?
       `;
-      await pool.query(updateGroupsStatusSql, [
-        groupIndex,
-        adminIndex,
-        instance_id
-      ]);
+        await pool.query(updateGroupsStatusSql, [
+          groupIndex,
+          adminIndex,
+          instance_id
+        ]);
 
-      log.info(
-        {
-          instance_id,
-          totalGroups: groupIndex,
-          totalAdmins: adminIndex
-        },
-        "Groups metadata processed and stored successfully"
-      );
+        log.info(
+          {
+            instance_id,
+            totalGroups: groupIndex,
+            totalAdmins: adminIndex
+          },
+          "Groups metadata processed and stored successfully"
+        );
 
-      return { allGroups, adminGroups };
-    } catch (error) {
-      log.error({ error }, "Failed to fetch and process group metadata");
-      throw error;
+        return { allGroups, adminGroups };
+      } catch (error) {
+        log.error({ error }, "Failed to fetch and process group metadata");
+        throw error;
+      }
     }
   };
 
