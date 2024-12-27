@@ -806,7 +806,7 @@ export function makeMySQLStore(
 
             const metadata = await getGroupByJid(id);
 
-            if (metadata || skippedGroups.includes(id)) continue;
+            if (metadata) continue;
 
             const sql = `SELECT group_index, admin_index FROM groups_status WHERE instance_id = ?`;
             const statusRows = await customQuery(sql, [instance_id]);
@@ -815,8 +815,13 @@ export function makeMySQLStore(
               let { group_index, admin_index } = statusRows[0];
               const admin = await isUserAdminOrSuperAdmin(participants);
 
-              if (announce && !isCommunity && isCommunityAnnounce && !admin)
+              if (
+                (skippedGroups.includes(id) && !admin) ||
+                (isCommunity && !announce && !isCommunityAnnounce) ||
+                (announce && !isCommunity && isCommunityAnnounce && !admin)
+              ) {
                 continue;
+              }
 
               group_index = group_index + 1;
 
@@ -1197,10 +1202,12 @@ export function makeMySQLStore(
           const admin = await isUserAdminOrSuperAdmin(participants);
 
           if (
-            (announce && !isCommunity && isCommunityAnnounce && !admin) ||
-            excludeIds.includes(id)
-          )
+            (skippedGroups.includes(id) && !admin) ||
+            (isCommunity && !announce && !isCommunityAnnounce) ||
+            (announce && !isCommunity && isCommunityAnnounce && !admin)
+          ) {
             continue;
+          }
 
           groupIndex++;
 
@@ -1232,10 +1239,10 @@ export function makeMySQLStore(
         }
 
         const insertMetadataSql = `
-        INSERT INTO groups_metadata (instance_id, jid, subject, is_admin, group_index, admin_index, metadata)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE is_admin = ?, metadata = ?
-      `;
+          INSERT INTO groups_metadata (instance_id, jid, subject, is_admin, group_index, admin_index, metadata)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE is_admin = ?, metadata = ?
+        `;
 
         for (const group of groupMetadata) {
           const metadataJson = JSON.stringify(group.metadata);
@@ -1254,14 +1261,16 @@ export function makeMySQLStore(
         }
 
         const updateGroupsStatusSql = `
-        UPDATE groups_status
-        SET group_index = group_index + ?, admin_index = admin_index + ?
-        WHERE instance_id = ?
-      `;
+          INSERT INTO groups_status (instance_id, status, group_index, admin_index)
+          VALUES (?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+          group_index = group_index + VALUES(group_index),
+          admin_index = admin_index + VALUES(admin_index)`;
         await pool.query(updateGroupsStatusSql, [
+          instance_id,
+          true,
           groupIndex,
-          adminIndex,
-          instance_id
+          adminIndex
         ]);
 
         log.info(
@@ -1340,7 +1349,7 @@ export function makeMySQLStore(
       throw error;
     }
   };
-  
+
   // const demoteUser = async (jid: string): Promise<void> => {
   //   try {
   //     const fetchGroupSql = `
@@ -1661,7 +1670,7 @@ export function makeMySQLStore(
       try {
         const participating = rows[0].participating;
         const metadata: GroupMetadata = participating
-          ? JSON.parse(rows[0].metadata)
+          ? rows[0].metadata
           : undefined;
         return metadata;
       } catch (error) {
