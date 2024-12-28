@@ -526,7 +526,19 @@ export function makeMySQLStore(
       }) => {
         const { chats, contacts, messages, isLatest } = data;
 
-        const filteredChats = chats.filter((chat) => isJidUser(chat.id));
+        const filteredChats = chats
+          .filter((chat) => isJidUser(chat.id))
+          .map((chat) => {
+            if (
+              chat.messages?.some(
+                (m) => !m.message?.message && m.message?.messageStubType
+              )
+            ) {
+              return undefined;
+            }
+            return chat;
+          })
+          .filter(Boolean) as Chat[];
         const filteredContacts = contacts.filter((contact) =>
           isJidUser(contact.id)
         );
