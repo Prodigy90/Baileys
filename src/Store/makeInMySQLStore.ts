@@ -557,17 +557,21 @@ export function makeMySQLStore(
 
         if (filteredContacts.length > 0) {
           try {
+            const sql = `
+              INSERT INTO contacts (instance_id, jid, contact)
+              VALUES ?
+              ON DUPLICATE KEY UPDATE
+                contact = JSON_SET(VALUES(contact), '$.name', IFNULL(
+                  JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.name')),
+                  JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.name'))
+                ))
+            `;
+
             const contactRows = filteredContacts.map((contact) => [
               instance_id,
               contact.id,
               JSON.stringify(contact)
             ]);
-
-            const sql = `
-              INSERT INTO contacts (instance_id, jid, contact)
-              VALUES ?
-              ON DUPLICATE KEY UPDATE contact = VALUES(contact)
-            `;
 
             const batchSize = 500;
             for (let i = 0; i < contactRows.length; i += batchSize) {
@@ -596,21 +600,25 @@ export function makeMySQLStore(
     });
 
     ev.on("contacts.upsert", async (contacts: Contact[]) => {
+      const sqlUpsert = `
+        INSERT INTO contacts (instance_id, jid, contact)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          contact = JSON_SET(VALUES(contact), '$.name', IFNULL(
+            JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.name')),
+            JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.name'))
+          ));
+      `;
+
       for (const contact of contacts) {
         try {
           if (!isJidUser(contact.id)) continue;
 
-          const existingContact = await getChatById(contact.id);
-
-          if (existingContact && existingContact.name && !contact.name) {
-            contact.name = existingContact.name;
-          }
-
-          await saveStatusToMySQL("contacts", {
+          await customQuery(sqlUpsert, [
             instance_id,
-            jid: contact.id,
-            contact: JSON.stringify(contact)
-          });
+            contact.id,
+            JSON.stringify(contact)
+          ]);
         } catch (error) {
           log.error({ error, contact }, "Failed to upsert contact");
         }
