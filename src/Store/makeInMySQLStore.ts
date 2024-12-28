@@ -598,6 +598,14 @@ export function makeMySQLStore(
     ev.on("contacts.upsert", async (contacts: Contact[]) => {
       for (const contact of contacts) {
         try {
+          if (!isJidUser(contact.id)) continue;
+
+          const existingContact = await getChatById(contact.id);
+
+          if (existingContact && existingContact.name && !contact.name) {
+            contact.name = existingContact.name;
+          }
+
           await saveStatusToMySQL("contacts", {
             instance_id,
             jid: contact.id,
@@ -1643,15 +1651,9 @@ export function makeMySQLStore(
           JSON_UNQUOTE(JSON_EXTRACT(contact, '$.name')) IS NOT NULL;
       `;
 
-      const [rows] = await pool.query<RowDataPacket[]>(sql, [instance_id]);
+      const [rows] = await customQuery(sql, [instance_id]);
 
-      return rows.map((row) => {
-        const contact =
-          typeof row.contact === "string"
-            ? JSON.parse(row.contact)
-            : row.contact;
-        return contact;
-      });
+      return rows;
     } catch (error) {
       log.error(
         { error, key: { instanceId: instance_id } },
