@@ -72,6 +72,7 @@ interface makeMySQLStoreFunc {
   customQuery: (query: string, params?: any[]) => Promise<any>;
   getAllChats: () => Promise<Chat[]>;
   getAllContacts: () => Promise<Contact[]>;
+  getAllSavedContacts: () => Promise<Contact[]>;
   fetchAllGroupsMetadata: (
     sock: WASocket | undefined
   ) => Promise<GroupMetadataResult>;
@@ -138,6 +139,9 @@ interface makeMySQLStoreFunc {
  *
  * @property {function(): Promise<Contact[]>} getAllContacts -
  * Retrieves a list of all contacts stored in the MySQL store.
+ *
+ * @property {function(): Promise<Contact[]>} getAllContacts -
+ * Retrieves a list of all saved contacts stored in the MySQL store.
  *
  * @property {function(): Promise<Chat[]>} getAllChats -
  * Retrieves a list of all contacts stored in the MySQL store.
@@ -1624,6 +1628,39 @@ export function makeMySQLStore(
     }
   };
 
+  const getAllSavedContacts = async (): Promise<Contact[]> => {
+    try {
+      const sql = `
+        SELECT
+          jid AS id,
+          JSON_UNQUOTE(JSON_EXTRACT(contact, '$.name')) AS name
+        FROM
+          contacts
+        WHERE
+          instance_id = ?
+          AND jid LIKE '%@s.whatsapp.net'
+          AND
+          JSON_UNQUOTE(JSON_EXTRACT(contact, '$.name')) IS NOT NULL;
+      `;
+
+      const [rows] = await pool.query<RowDataPacket[]>(sql, [instance_id]);
+
+      return rows.map((row) => {
+        const contact =
+          typeof row.contact === "string"
+            ? JSON.parse(row.contact)
+            : row.contact;
+        return contact;
+      });
+    } catch (error) {
+      log.error(
+        { error, key: { instanceId: instance_id } },
+        "Failed to retrieve saved contacts"
+      );
+      throw error;
+    }
+  };
+
   const getChatById = async (jid: string): Promise<Chat | undefined> => {
     try {
       const sql = `SELECT chat FROM chats WHERE jid = ?`;
@@ -1769,6 +1806,7 @@ export function makeMySQLStore(
     mostRecentMessage,
     fetchGroupMetadata,
     updateMessageStatus,
+    getAllSavedContacts,
     fetchMessageReceipts,
     loadAllGroupMetadata,
     loadGroupMetadataByJid,
