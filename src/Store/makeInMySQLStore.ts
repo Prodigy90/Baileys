@@ -766,7 +766,7 @@ export function makeMySQLStore(
                 update.key.participant
               ]);
 
-              if (result[0].viewer_count === 0) {
+              if (result[0].count === 0) {
                 const updateSql = `
                   UPDATE status_updates
                   SET view_count = view_count + 1
