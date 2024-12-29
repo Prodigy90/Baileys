@@ -1137,7 +1137,7 @@ export function makeMySQLStore(
     if (inDB) {
       try {
         const allGroupsQuery = `
-          SELECT id, subject, group_index AS groupIndex
+          SELECT jid as id, subject, group_index AS groupIndex
           FROM groups_metadata
           WHERE instance_id = ?
           ORDER BY group_index ASC
@@ -1148,7 +1148,7 @@ export function makeMySQLStore(
         ])) as [{ id: string; subject: string; groupIndex: number }[]];
 
         const adminGroupsQuery = `
-          SELECT id, subject, admin_index AS adminIndex, 
+          SELECT jid as id, subject, admin_index AS adminIndex, 
                 JSON_EXTRACT(metadata, '$.participants') AS participants
           FROM groups_metadata
           WHERE instance_id = ? AND is_admin = 1
