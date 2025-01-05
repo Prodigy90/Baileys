@@ -573,10 +573,17 @@ export function makeMySQLStore(
               INSERT INTO contacts (instance_id, jid, contact)
               VALUES ?
               ON DUPLICATE KEY UPDATE
-                contact = JSON_SET(VALUES(contact), '$.name', IFNULL(
-                  JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.name')),
-                  JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.name'))
-                ))
+                contact = JSON_SET(
+                  VALUES(contact),
+                  '$.name', IFNULL(
+                    JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.name')),
+                    JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.name'))
+                  ),
+                  '$.notify', IFNULL(
+                    JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.notify')),
+                    JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.notify'))
+                  )
+                )
             `;
 
             const contactRows = filteredContacts.map((contact) => [
