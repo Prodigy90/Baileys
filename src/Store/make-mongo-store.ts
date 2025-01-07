@@ -606,13 +606,28 @@ export default ({
 		})
 	}
 
-	const toJSON = () => ({
-		chats,
-		contacts,
-		messages,
-		labels,
-		labelAssociations,
-	})
+    const toJSON = async () => {
+        const chatsData = await chats.find().toArray();
+        const contactsData = await contacts.find().toArray();
+        const labelAssociationsData = await labelAssociations.find().toArray();
+
+        const labelsData = Array.from(labels.entityMap.entries()).map(
+			([key, value]) => ({
+				key,
+				value
+			})
+        );
+
+        const data = {
+			chats: chatsData,
+			messages: messages,
+			labels: labelsData,
+			contacts: contactsData,
+			labelAssociations: labelAssociationsData
+        };
+
+        return data;
+    };
 
 	// TODO: replace upsert logic by corresponding mongodb collection methods
 	const fromJSON = async(json: {

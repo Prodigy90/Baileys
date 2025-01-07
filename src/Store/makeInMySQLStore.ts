@@ -524,7 +524,7 @@ export function makeMySQLStore(
         syncType?: proto.HistorySync.HistorySyncType;
         peerDataRequestSessionId?: string | null;
       }) => {
-        const { chats, contacts, messages, isLatest } = data;
+        const { chats, contacts } = data;
 
         const filteredChats = chats
           .filter(
@@ -625,10 +625,17 @@ export function makeMySQLStore(
         INSERT INTO contacts (instance_id, jid, contact)
         VALUES (?, ?, ?)
         ON DUPLICATE KEY UPDATE
-          contact = JSON_SET(VALUES(contact), '$.name', IFNULL(
-            JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.name')),
-            JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.name'))
-          ));
+          contact = JSON_SET(
+            VALUES(contact),
+            '$.name', IFNULL(
+              JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.name')),
+              JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.name'))
+            ),
+            '$.notify', IFNULL(
+              JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.notify')),
+              JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.notify'))
+            )
+          )
       `;
 
       for (const contact of contacts) {
@@ -1391,131 +1398,6 @@ export function makeMySQLStore(
     }
   };
 
-  // const demoteUser = async (jid: string): Promise<void> => {
-  //   try {
-  //     const fetchGroupSql = `
-  //     SELECT is_admin
-  //     FROM groups_metadata
-  //     WHERE instance_id = ? AND jid = ?`;
-  //     const groupRows = await customQuery(fetchGroupSql, [instance_id, jid]);
-
-  //     if (groupRows.length === 0) {
-  //       log.warn({ jid }, "Group not found in metadata, skipping demotion");
-  //       return;
-  //     }
-
-  //     const { is_admin: isAdmin } = groupRows[0];
-
-  //     if (!isAdmin) {
-  //       log.info({ jid }, "User is already not an admin, skipping");
-  //       return;
-  //     }
-
-  //     const updateIndexSql = `
-  //     UPDATE groups_metadata
-  //     SET is_admin = FALSE
-  //     WHERE instance_id = ? AND jid = ?`;
-  //     await customQuery(updateIndexSql, [instance_id, jid]);
-
-  //     log.info({ jid }, "User demoted successfully");
-  //   } catch (error) {
-  //     log.error({ error, jid }, "Failed to demote user in group");
-  //     throw error;
-  //   }
-  // };
-
-  // const promoteUser = async (jid: string): Promise<void> => {
-  //   try {
-  //     const fetchGroupSql = `
-  //     SELECT admin_index, participating
-  //     FROM groups_metadata
-  //     WHERE instance_id = ? AND jid = ?`;
-  //     const groupRows = await customQuery(fetchGroupSql, [instance_id, jid]);
-
-  //     if (groupRows.length === 0) {
-  //       log.warn({ jid }, "Group not found in metadata, skipping promotion");
-  //       return;
-  //     }
-
-  //     const { admin_index, participating } = groupRows[0];
-
-  //     if (!participating) {
-  //       log.warn(
-  //         { jid },
-  //         "User is not participating in the group, skipping promotion"
-  //       );
-  //       return;
-  //     }
-
-  //     if (admin_index > 0) {
-  //       log.info({ jid }, "User is already an admin, skipping");
-  //       return;
-  //     }
-
-  //     const fetchStatusSql = `
-  //     SELECT admin_index
-  //     FROM groups_status
-  //     WHERE instance_id = ?`;
-  //     const statusRows = await customQuery(fetchStatusSql, [instance_id]);
-  //     const currentAdminIndex =
-  //       statusRows.length > 0 ? statusRows[0].admin_index : null;
-
-  //     if (currentAdminIndex === null) {
-  //       log.error({ jid }, "No admin index found in status table");
-  //       return;
-  //     }
-
-  //     const updateStatusSql = `
-  //     UPDATE groups_status
-  //     SET admin_index = admin_index + 1
-  //     WHERE instance_id = ?`;
-  //     await customQuery(updateStatusSql, [instance_id]);
-
-  //     const updateMetadataSql = `
-  //     UPDATE groups_metadata
-  //     SET admin_index = ?, is_admin = TRUE
-  //     WHERE instance_id = ? AND jid = ?`;
-  //     await customQuery(updateMetadataSql, [
-  //       currentAdminIndex + 1,
-  //       instance_id,
-  //       jid
-  //     ]);
-
-  //     log.info({ jid }, "Promoted user successfully");
-  //   } catch (error) {
-  //     log.error({ error, jid }, "Failed to promote user in group");
-  //     throw error;
-  //   }
-  // };
-
-  // const removeGroup = async (jid: string): Promise<void> => {
-  //   try {
-  //     const fetchGroupSql = `
-  //     SELECT id
-  //     FROM groups_metadata
-  //     WHERE instance_id = ? AND jid = ?`;
-  //     const groupRows = await customQuery(fetchGroupSql, [instance_id, jid]);
-
-  //     if (groupRows.length === 0) {
-  //       log.warn({ jid }, "Group not found in metadata, skipping removal");
-  //       return;
-  //     }
-
-  //     const deleteMetadataSql = `
-  //     UPDATE groups_metadata
-  //     SET metadata = NULL,
-  //         participating = FALSE,
-  //         is_admin = FALSE
-  //     WHERE instance_id = ? AND jid = ?`;
-  //     await customQuery(deleteMetadataSql, [instance_id, jid]);
-
-  //     log.info({ jid }, "Group removed successfully; metadata cleared");
-  //   } catch (error) {
-  //     log.error({ error, jid }, "Failed to remove group");
-  //     throw error;
-  //   }
-  // };
-
   const fetchMessageReceipts = async ({
     remoteJid,
     id
@@ -1534,13 +1416,91 @@ export function makeMySQLStore(
     };
   };
 
-  const fromJSON = (json: any) => {
-    const { chats, contacts, messages, labels, labelAssociations } = json;
-    setData("chats", chats);
-    setData("contacts", contacts);
-    setData("messages", messages);
-    setData("labels", labels);
-    setData("labelAssociations", labelAssociations);
+  const fromJSON = async (json: {
+    chats: Chat[];
+    contacts: Contact[];
+    labels: { [labelId: string]: Label };
+    labelAssociations: LabelAssociation[];
+    messages: { [id: string]: WAMessage[] };
+  }) => {
+    const { chats, contacts } = json;
+    const filteredChats = chats
+      .filter(
+        (chat) =>
+          isJidUser(chat.id) &&
+          !chat.messages?.some(
+            (m) => !m.message?.message && m.message?.messageStubType
+          )
+      )
+      .map((chat) => {
+        if (chat.messages) {
+          chat.messages = [];
+        }
+        return chat;
+      }) as Chat[];
+
+    const filteredContacts = contacts.filter((contact) =>
+      isJidUser(contact.id)
+    );
+
+    if (filteredChats.length > 0) {
+      try {
+        const chatRows = filteredChats.map((chat) => [
+          instance_id,
+          chat.id,
+          JSON.stringify(chat)
+        ]);
+
+        const sql = `
+              INSERT INTO chats (instance_id, jid, chat)
+              VALUES ?
+              ON DUPLICATE KEY UPDATE chat = VALUES(chat)
+            `;
+
+        const batchSize = 500;
+        for (let i = 0; i < chatRows.length; i += batchSize) {
+          const batch = chatRows.slice(i, i + batchSize);
+          await customQuery(sql, [batch]);
+        }
+      } catch (error) {
+        log.error({ error, instance_id }, "Failed to upsert chats");
+      }
+    }
+
+    if (filteredContacts.length > 0) {
+      try {
+        const sql = `
+              INSERT INTO contacts (instance_id, jid, contact)
+              VALUES ?
+              ON DUPLICATE KEY UPDATE
+                contact = JSON_SET(
+                  VALUES(contact),
+                  '$.name', IFNULL(
+                    JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.name')),
+                    JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.name'))
+                  ),
+                  '$.notify', IFNULL(
+                    JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.notify')),
+                    JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.notify'))
+                  )
+                )
+            `;
+
+        const contactRows = filteredContacts.map((contact) => [
+          instance_id,
+          contact.id,
+          JSON.stringify(contact)
+        ]);
+
+        const batchSize = 500;
+        for (let i = 0; i < contactRows.length; i += batchSize) {
+          const batch = contactRows.slice(i, i + batchSize);
+          await customQuery(sql, [batch]);
+        }
+      } catch (error) {
+        log.error({ error, instance_id }, "Failed to upsert contacts");
+      }
+    }
   };
 
   const loadMessages = async (
