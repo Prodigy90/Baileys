@@ -1424,6 +1424,7 @@ export function makeMySQLStore(
     messages: { [id: string]: WAMessage[] };
   }) => {
     const { chats, contacts } = json;
+
     const filteredChats = chats
       .filter(
         (chat) =>
@@ -1443,6 +1444,9 @@ export function makeMySQLStore(
       isJidUser(contact.id)
     );
 
+    let totalChatsAffected = 0;
+    let totalContactsAffected = 0;
+
     if (filteredChats.length > 0) {
       try {
         const chatRows = filteredChats.map((chat) => [
@@ -1452,15 +1456,16 @@ export function makeMySQLStore(
         ]);
 
         const sql = `
-              INSERT INTO chats (instance_id, jid, chat)
-              VALUES ?
-              ON DUPLICATE KEY UPDATE chat = VALUES(chat)
-            `;
+            INSERT INTO chats (instance_id, jid, chat)
+            VALUES ?
+            ON DUPLICATE KEY UPDATE chat = VALUES(chat)
+          `;
 
         const batchSize = 500;
         for (let i = 0; i < chatRows.length; i += batchSize) {
           const batch = chatRows.slice(i, i + batchSize);
-          await customQuery(sql, [batch]);
+          const result = await customQuery(sql, [batch]);
+          totalChatsAffected += result.affectedRows;
         }
       } catch (error) {
         log.error({ error, instance_id }, "Failed to upsert chats");
@@ -1470,21 +1475,21 @@ export function makeMySQLStore(
     if (filteredContacts.length > 0) {
       try {
         const sql = `
-              INSERT INTO contacts (instance_id, jid, contact)
-              VALUES ?
-              ON DUPLICATE KEY UPDATE
-                contact = JSON_SET(
-                  VALUES(contact),
-                  '$.name', IFNULL(
-                    JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.name')),
-                    JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.name'))
-                  ),
-                  '$.notify', IFNULL(
-                    JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.notify')),
-                    JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.notify'))
-                  )
+            INSERT INTO contacts (instance_id, jid, contact)
+            VALUES ?
+            ON DUPLICATE KEY UPDATE
+              contact = JSON_SET(
+                VALUES(contact),
+                '$.name', IFNULL(
+                  JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.name')),
+                  JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.name'))
+                ),
+                '$.notify', IFNULL(
+                  JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.notify')),
+                  JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.notify'))
                 )
-            `;
+              )
+          `;
 
         const contactRows = filteredContacts.map((contact) => [
           instance_id,
@@ -1495,12 +1500,18 @@ export function makeMySQLStore(
         const batchSize = 500;
         for (let i = 0; i < contactRows.length; i += batchSize) {
           const batch = contactRows.slice(i, i + batchSize);
-          await customQuery(sql, [batch]);
+          const result = await customQuery(sql, [batch]);
+          totalContactsAffected += result.affectedRows;
         }
       } catch (error) {
         log.error({ error, instance_id }, "Failed to upsert contacts");
       }
     }
+
+    return {
+      totalChatsAffected,
+      totalContactsAffected
+    };
   };
 
   const loadMessages = async (
