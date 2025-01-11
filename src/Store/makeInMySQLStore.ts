@@ -1440,8 +1440,12 @@ export function makeMySQLStore(
         return chat;
       }) as Chat[];
 
-    const filteredContacts = contacts.filter((contact) =>
-      isJidUser(contact.id)
+    const filteredContacts = contacts.filter(
+      (contact) =>
+        isJidUser(contact.id) &&
+        contact.name !== null &&
+        contact.name !== "null" &&
+        contact.name?.trim() !== ""
     );
 
     let totalChatsAffected = 0;
