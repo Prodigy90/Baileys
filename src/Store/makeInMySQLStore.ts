@@ -400,8 +400,9 @@ export function makeMySQLStore(
 
   const getUserData = async (): Promise<any | null> => {
     try {
-      if (cache.has(instance_id)) {
-        return cache.get(instance_id);
+      const user_data_cache_key = `${instance_id}_user_cache`;
+      if (cache.has(user_data_cache_key)) {
+        return cache.get(user_data_cache_key);
       }
 
       const sql = `SELECT * FROM users WHERE instance_id = ?`;
@@ -410,7 +411,7 @@ export function makeMySQLStore(
       if (rows.length > 0) {
         const user_data = { username: rows[0].username, jid: rows[0].jid };
 
-        cache.set(instance_id, user_data);
+        cache.set(user_data_cache_key, user_data);
         return user_data;
       } else {
         log.warn({ instance_id }, "No user data found for instance_id");
@@ -420,6 +421,35 @@ export function makeMySQLStore(
     }
 
     return null;
+  };
+
+  const getStatusInDBResult = async (id: string): Promise<Boolean> => {
+    try {
+      const message_reciept_cache_key = `${instance_id}_${id}`;
+      if (cache.has(message_reciept_cache_key)) {
+        return cache.get(message_reciept_cache_key);
+      }
+
+      const statusInDBSql = `
+              SELECT COUNT(*) AS count FROM status_updates
+              WHERE status_id = ? AND instance_id = ?
+            `;
+      const statusInDBResult = await customQuery(statusInDBSql, [
+        id,
+        instance_id
+      ]);
+
+      if (statusInDBResult[0].count === 0) {
+        cache.set(message_reciept_cache_key, false);
+        return false;
+      }
+
+      cache.set(message_reciept_cache_key, true);
+      return true;
+    } catch (error) {
+      log.error({ error }, "Error checking if status is in db");
+      return false;
+    }
   };
 
   const isUserGroupAdmin = async (id: string): Promise<Boolean> => {
@@ -756,6 +786,9 @@ export function makeMySQLStore(
               update.key.fromMe &&
               isJidStatusBroadcast(update.key.remoteJid as string)
             ) {
+              const inDB = await getStatusInDBResult(update.key.id);
+              if (!inDB) continue;
+
               await saveStatusToMySQL("status_viewers", {
                 instance_id,
                 status_id: update.key.id,
