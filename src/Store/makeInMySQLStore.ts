@@ -2,28 +2,23 @@ import type {
   Chat,
   Contact,
   WAMessage,
-  PresenceData,
   WAMessageKey,
   GroupMetadata,
   ConnectionState,
   BaileysEventEmitter,
-  GroupParticipant,
-  ParticipantAction
+  GroupParticipant
 } from "../Types";
 import pino from "pino";
+import pkg from "moment-timezone";
+import { toNumber } from "../Utils";
 import { LRUCache } from "lru-cache";
 import { proto } from "../../WAProto";
 import { Label } from "../Types/Label";
 import type makeMDSocket from "../Socket";
-import { isJidGroup, isJidStatusBroadcast, isJidUser } from "../WABinary";
 import { LabelAssociation } from "../Types/LabelAssociation";
-import {
-  Pool,
-  RowDataPacket,
-  ResultSetHeader,
-  QueryResult
-} from "mysql2/promise";
-import { toNumber } from "../Utils";
+import { isJidStatusBroadcast, isJidUser } from "../WABinary";
+import { Pool, RowDataPacket, ResultSetHeader } from "mysql2/promise";
+const { utc } = pkg;
 
 type WASocket = ReturnType<typeof makeMDSocket>;
 
@@ -211,7 +206,7 @@ export function makeMySQLStore(
   logger?: pino.Logger
 ): makeMySQLStoreFunc {
   const state: ConnectionState | null = null;
-  const cache = new LRUCache<string, any>({ max: 10000 });
+  const cache = new LRUCache<string, any>({ max: 1000 });
   const writeQueue: Array<() => Promise<void>> = [];
   let isWriting = false;
 
@@ -660,14 +655,14 @@ export function makeMySQLStore(
           for (const message of update.messages) {
             if (message.key && message.key.id) {
               if (message.key.fromMe) {
+                const localTime = utc(new Date())
+                  .tz("Africa/Lagos")
+                  .format("YYYY-MM-DD HH:mm:ss");
                 await saveStatusToMySQL("messages", {
                   instance_id,
                   message_id: message.key.id,
                   message_data: JSON.stringify(message),
-                  post_date: new Date()
-                    .toISOString()
-                    .slice(0, 19)
-                    .replace("T", " ")
+                  post_date: localTime
                 });
 
                 if (
@@ -675,14 +670,12 @@ export function makeMySQLStore(
                   !message.message?.reactionMessage
                 ) {
                   const messageType = getMessageType(message);
+
                   await saveStatusToMySQL("status_updates", {
                     instance_id,
                     status_id: message.key.id,
                     status_message: JSON.stringify(message),
-                    post_date: new Date()
-                      .toISOString()
-                      .slice(0, 19)
-                      .replace("T", " "),
+                    post_date: localTime,
                     message_type: messageType
                   });
                 }
