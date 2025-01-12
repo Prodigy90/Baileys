@@ -1043,8 +1043,9 @@ export function makeMySQLStore(
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT status_message, view_count, message_type, post_date FROM status_updates
-       WHERE instance_id = ?
-         AND post_date >= NOW() - INTERVAL 24 HOUR`,
+          WHERE instance_id = ?
+          AND post_date >= NOW() - INTERVAL 24 HOUR
+          ORDER BY post_date ASC`,
         [instance_id]
       );
 
