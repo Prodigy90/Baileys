@@ -670,6 +670,7 @@ export function makeMySQLStore(
                   !message.message?.reactionMessage
                 ) {
                   const messageType = getMessageType(message);
+                  if (messageType === "unknown") continue;
 
                   await saveStatusToMySQL("status_updates", {
                     instance_id,
