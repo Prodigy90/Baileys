@@ -62,8 +62,7 @@ interface makeMySQLStoreFunc {
     count: number
   ) => Promise<proto.IWebMessageInfo[]>;
   loadMessage: (id: string) => Promise<proto.IWebMessageInfo | undefined>;
-  loadAllGroupMetadata: () => Promise<GroupMetadata[]>;
-  loadGroupMetadataByJid: (jid: string) => Promise<GroupMetadata | undefined>;
+  loadAllGroupsMetadata: () => Promise<GroupMetadata[]>;
   customQuery: (query: string, params?: any[]) => Promise<any>;
   getAllChats: () => Promise<Chat[]>;
   getAllContacts: () => Promise<Contact[]>;
@@ -123,11 +122,8 @@ interface makeMySQLStoreFunc {
  * @property {function(string): Promise<proto.IWebMessageInfo | undefined>} loadMessage -
  * Loads a specific message by its message ID and instance_id from the MySQL store.
  *
- * @property {function(): Promise<GroupMetadata[]>} loadAllGroupMetadata -
+ * @property {function(): Promise<GroupMetadata[]>} loadAllGroupsMetadata -
  * Retrieves metadata for all groups from the MySQL store.
- *
- * @property {function(string): Promise<GroupMetadata | undefined>} loadGroupMetadataByJid -
- * Loads metadata for a specific group using its JID.
  *
  * @property {function(string, any[]): Promise<any>} customQuery -
  * Executes a custom SQL query with optional parameters, enabling advanced interaction with the MySQL database.
@@ -431,15 +427,18 @@ export function makeMySQLStore(
       }
 
       const statusInDBSql = `
-              SELECT COUNT(*) AS count FROM status_updates
+            SELECT EXISTS(
+              SELECT 1 
+              FROM status_updates 
               WHERE status_id = ? AND instance_id = ?
+            ) AS exists_flag;
             `;
       const statusInDBResult = await customQuery(statusInDBSql, [
         id,
         instance_id
       ]);
 
-      if (statusInDBResult[0].count === 0) {
+      if (statusInDBResult[0].exists_flag === 0) {
         cache.set(message_reciept_cache_key, false);
         return false;
       }
@@ -519,12 +518,18 @@ export function makeMySQLStore(
   };
 
   const hasGroups = async (): Promise<boolean> => {
+    if (cache.has(`${instance_id}_hasGroups`)) {
+      return cache.get(`${instance_id}_hasGroups`);
+    }
     const [rows] = await pool.query<RowDataPacket[]>(
       "SELECT status FROM groups_status WHERE instance_id = ?",
       [instance_id]
     );
 
-    return rows.length > 0 && rows[0].status === 1;
+    const result = rows.length > 0 && rows[0].status === 1;
+    const hasGroupskey = `${instance_id}_hasGroups`;
+    cache.set(hasGroupskey, result);
+    return result;
   };
 
   const setData = async (key: string, data: any): Promise<void> => {
@@ -799,9 +804,15 @@ export function makeMySQLStore(
                   .replace("T", " ")
               });
 
+              const viewerCacheKey = `${update.key.id}_${update.key.participant}`;
+              if (cache.has(viewerCacheKey)) continue;
+
               const checkSql = `
-                  SELECT COUNT(*) AS count FROM status_viewers
-                  WHERE status_id = ? AND viewer_jid = ?
+                    SELECT EXISTS(
+                      SELECT 1 
+                      FROM status_viewers 
+                      WHERE status_id = ? AND viewer_jid = ?
+                    ) AS exists_flag;
                 `;
 
               const result = await customQuery(checkSql, [
@@ -809,7 +820,8 @@ export function makeMySQLStore(
                 update.key.participant
               ]);
 
-              if (result[0].count === 0) {
+              if (result[0].exists_flag === 0) {
+                cache.set(viewerCacheKey, true);
                 const updateSql = `
                   UPDATE status_updates
                   SET view_count = view_count + 1
@@ -1170,6 +1182,41 @@ export function makeMySQLStore(
     } catch (error) {
       log.error({ error, jid }, "Failed to fetch image URL");
       return null;
+    }
+  };
+
+  const loadAllGroupsMetadata = async (): Promise<GroupMetadata[]> => {
+    try {
+      const inDB = await hasGroups();
+
+      if (!inDB) return [];
+      const ALL_GROUPS_METADATA_KEY = `${instance_id}_all_groups_metadata`;
+      const cached = cache.get(ALL_GROUPS_METADATA_KEY);
+      if (cached) return cached;
+
+      const sql = `SELECT metadata FROM groups_metadata WHERE instance_id = ?`;
+      const [rows] = await pool.query<RowDataPacket[]>(sql, [instance_id]);
+
+      const metadata = rows
+        .map((row) => {
+          try {
+            return typeof row.metadata === "object"
+              ? row.metadata
+              : JSON.parse(row.metadata);
+          } catch (parseError) {
+            log.error(
+              { error: parseError, metadata: row.metadata },
+              "Failed to parse group metadata"
+            );
+            return null;
+          }
+        })
+        .filter(Boolean);
+      cache.set(ALL_GROUPS_METADATA_KEY, metadata);
+      return metadata;
+    } catch (error) {
+      log.error({ error }, "Failed to load all group metadata");
+      return [];
     }
   };
 
@@ -1588,36 +1635,6 @@ export function makeMySQLStore(
     return undefined;
   };
 
-  const loadAllGroupMetadata = async (): Promise<GroupMetadata[]> => {
-    try {
-      const [rows] = await pool.query<RowDataPacket[]>(
-        "SELECT `value` FROM baileys_store WHERE instance_id = ? AND `key` LIKE ?",
-        [instance_id, "group-%"]
-      );
-      return rows
-        .map((row) => {
-          try {
-            return typeof row.value === "object"
-              ? row.value
-              : JSON.parse(row.value.toString());
-          } catch (parseError) {
-            log.error({ error: parseError }, "Failed to parse group metadata");
-            return null;
-          }
-        })
-        .filter(Boolean);
-    } catch (error) {
-      log.error({ error }, "Failed to load all group metadata");
-      return [];
-    }
-  };
-
-  const loadGroupMetadataByJid = async (
-    jid: string
-  ): Promise<GroupMetadata | undefined> => {
-    return await getData(`group-${jid}`);
-  };
-
   const customQuery = async (query: string, params?: any[]): Promise<any> => {
     try {
       const [result] = await pool.query(query, params);
@@ -1842,8 +1859,7 @@ export function makeMySQLStore(
     updateMessageStatus,
     getAllSavedContacts,
     fetchMessageReceipts,
-    loadAllGroupMetadata,
-    loadGroupMetadataByJid,
+    loadAllGroupsMetadata,
     fetchAllGroupsMetadata,
     getRecentStatusUpdates
   };
