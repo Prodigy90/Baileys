@@ -8,17 +8,20 @@ import type {
   BaileysEventEmitter,
   GroupParticipant
 } from "../Types";
+import {
+  isJidUser,
+  jidNormalizedUser,
+  isJidStatusBroadcast
+} from "../WABinary";
 import pino from "pino";
-import pkg from "moment-timezone";
 import { toNumber } from "../Utils";
 import { LRUCache } from "lru-cache";
 import { proto } from "../../WAProto";
+import { utc } from "moment-timezone";
 import { Label } from "../Types/Label";
 import type makeMDSocket from "../Socket";
 import { LabelAssociation } from "../Types/LabelAssociation";
-import { isJidStatusBroadcast, isJidUser } from "../WABinary";
 import { Pool, RowDataPacket, ResultSetHeader } from "mysql2/promise";
-const { utc } = pkg;
 
 type WASocket = ReturnType<typeof makeMDSocket>;
 
@@ -421,30 +424,18 @@ export function makeMySQLStore(
 
   const getStatusInDBResult = async (id: string): Promise<Boolean> => {
     try {
-      const message_reciept_cache_key = `${instance_id}_${id}`;
-      if (cache.has(message_reciept_cache_key)) {
-        return cache.get(message_reciept_cache_key);
-      }
-
       const statusInDBSql = `
-            SELECT EXISTS(
-              SELECT 1 
-              FROM status_updates 
-              WHERE status_id = ? AND instance_id = ?
-            ) AS exists_flag;
-            `;
+      SELECT EXISTS(
+        SELECT 1 
+        FROM status_updates 
+        WHERE status_id = ? AND instance_id = ?
+      ) AS exists_flag;
+    `;
       const statusInDBResult = await customQuery(statusInDBSql, [
         id,
         instance_id
       ]);
-
-      if (statusInDBResult[0].exists_flag === 0) {
-        cache.set(message_reciept_cache_key, false);
-        return false;
-      }
-
-      cache.set(message_reciept_cache_key, true);
-      return true;
+      return statusInDBResult[0].exists_flag === 1;
     } catch (error) {
       log.error({ error }, "Error checking if status is in db");
       return false;
@@ -793,18 +784,21 @@ export function makeMySQLStore(
             ) {
               const inDB = await getStatusInDBResult(update.key.id);
               if (!inDB) continue;
+              const viewer_jid = jidNormalizedUser(
+                update.key.participant as string
+              );
 
               await saveStatusToMySQL("status_viewers", {
+                viewer_jid,
                 instance_id,
                 status_id: update.key.id,
-                viewer_jid: update.key.participant,
                 view_date: new Date()
                   .toISOString()
                   .slice(0, 19)
                   .replace("T", " ")
               });
 
-              const viewerCacheKey = `${update.key.id}_${update.key.participant}`;
+              const viewerCacheKey = `${update.key.id}_${viewer_jid}`;
               if (cache.has(viewerCacheKey)) continue;
 
               const checkSql = `
@@ -817,7 +811,7 @@ export function makeMySQLStore(
 
               const result = await customQuery(checkSql, [
                 update.key.id,
-                update.key.participant
+                viewer_jid
               ]);
 
               if (result[0].exists_flag === 0) {
