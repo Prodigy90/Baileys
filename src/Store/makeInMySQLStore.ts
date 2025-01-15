@@ -674,165 +674,165 @@ export function makeMySQLStore(
       }
     });
 
-    ev.on(
-      "messages.upsert",
-      async (update: { messages: WAMessage[]; type: string }) => {
-        try {
-          for (const message of update.messages) {
-            if (message.key && message.key.id) {
-              if (message.key.fromMe) {
-                const localTime = utc(new Date())
-                  .tz("Africa/Lagos")
-                  .format("YYYY-MM-DD HH:mm:ss");
-                await saveStatusToMySQL("messages", {
-                  instance_id,
-                  message_id: message.key.id,
-                  message_data: JSON.stringify(message),
-                  post_date: localTime
-                });
+    // ev.on(
+    //   "messages.upsert",
+    //   async (update: { messages: WAMessage[]; type: string }) => {
+    //     try {
+    //       for (const message of update.messages) {
+    //         if (message.key && message.key.id) {
+    //           if (message.key.fromMe) {
+    //             const localTime = utc(new Date())
+    //               .tz("Africa/Lagos")
+    //               .format("YYYY-MM-DD HH:mm:ss");
+    //             await saveStatusToMySQL("messages", {
+    //               instance_id,
+    //               message_id: message.key.id,
+    //               message_data: JSON.stringify(message),
+    //               post_date: localTime
+    //             });
 
-                if (
-                  isJidStatusBroadcast(message.key.remoteJid as string) &&
-                  !message.message?.reactionMessage
-                ) {
-                  const messageType = getMessageType(message);
-                  if (messageType === "unknown") continue;
+    //             if (
+    //               isJidStatusBroadcast(message.key.remoteJid as string) &&
+    //               !message.message?.reactionMessage
+    //             ) {
+    //               const messageType = getMessageType(message);
+    //               if (messageType === "unknown") continue;
 
-                  await saveStatusToMySQL("status_updates", {
-                    instance_id,
-                    status_id: message.key.id,
-                    status_message: JSON.stringify(message),
-                    post_date: localTime,
-                    message_type: messageType
-                  });
-                }
-              } else if (
-                !message.key.fromMe &&
-                isJidUser(message.key.remoteJid as string)
-              ) {
-                const chat = await getChatById(message.key.remoteJid as string);
-                const contact = await getContactById(
-                  message.key.remoteJid as string
-                );
+    //               await saveStatusToMySQL("status_updates", {
+    //                 instance_id,
+    //                 status_id: message.key.id,
+    //                 status_message: JSON.stringify(message),
+    //                 post_date: localTime,
+    //                 message_type: messageType
+    //               });
+    //             }
+    //           } else if (
+    //             !message.key.fromMe &&
+    //             isJidUser(message.key.remoteJid as string)
+    //           ) {
+    //             const chat = await getChatById(message.key.remoteJid as string);
+    //             const contact = await getContactById(
+    //               message.key.remoteJid as string
+    //             );
 
-                if (
-                  contact &&
-                  message.pushName &&
-                  (!contact?.notify || contact?.notify === "")
-                ) {
-                  try {
-                    const updatedContact = {
-                      ...contact,
-                      notify: message.pushName
-                    };
+    //             if (
+    //               contact &&
+    //               message.pushName &&
+    //               (!contact?.notify || contact?.notify === "")
+    //             ) {
+    //               try {
+    //                 const updatedContact = {
+    //                   ...contact,
+    //                   notify: message.pushName
+    //                 };
 
-                    const sql = `UPDATE contacts SET contact = ? WHERE jid = ? AND instance_id = ?`;
-                    const params = [
-                      JSON.stringify(updatedContact),
-                      message.key.remoteJid,
-                      instance_id
-                    ];
+    //                 const sql = `UPDATE contacts SET contact = ? WHERE jid = ? AND instance_id = ?`;
+    //                 const params = [
+    //                   JSON.stringify(updatedContact),
+    //                   message.key.remoteJid,
+    //                   instance_id
+    //                 ];
 
-                    await customQuery(sql, params);
-                  } catch (error) {
-                    log.error(
-                      { error },
-                      "Failed to update contact notify field"
-                    );
-                  }
-                }
+    //                 await customQuery(sql, params);
+    //               } catch (error) {
+    //                 log.error(
+    //                   { error },
+    //                   "Failed to update contact notify field"
+    //                 );
+    //               }
+    //             }
 
-                if (!chat) {
-                  ev.emit("chats.upsert", [
-                    {
-                      id: message.key.remoteJid as string,
-                      conversationTimestamp: toNumber(message.messageTimestamp),
-                      unreadCount: 1
-                    }
-                  ]);
-                }
+    //             if (!chat) {
+    //               ev.emit("chats.upsert", [
+    //                 {
+    //                   id: message.key.remoteJid as string,
+    //                   conversationTimestamp: toNumber(message.messageTimestamp),
+    //                   unreadCount: 1
+    //                 }
+    //               ]);
+    //             }
 
-                if (!contact) {
-                  ev.emit("contacts.upsert", [
-                    {
-                      id: message.key.remoteJid as string,
-                      notify: message.pushName || ""
-                    }
-                  ]);
-                }
-              }
-            }
-          }
-        } catch (error) {
-          log.error(
-            { error, key: { instanceId: instance_id } },
-            "Failed to handle message upserts"
-          );
-        }
-      }
-    );
+    //             if (!contact) {
+    //               ev.emit("contacts.upsert", [
+    //                 {
+    //                   id: message.key.remoteJid as string,
+    //                   notify: message.pushName || ""
+    //                 }
+    //               ]);
+    //             }
+    //           }
+    //         }
+    //       }
+    //     } catch (error) {
+    //       log.error(
+    //         { error, key: { instanceId: instance_id } },
+    //         "Failed to handle message upserts"
+    //       );
+    //     }
+    //   }
+    // );
 
-    ev.on(
-      "message-receipt.update",
-      async (updates: { key: proto.IMessageKey }[]) => {
-        try {
-          for (const update of updates) {
-            if (
-              update.key.id &&
-              update.key.fromMe &&
-              isJidStatusBroadcast(update.key.remoteJid as string)
-            ) {
-              const inDB = await getStatusInDBResult(update.key.id);
-              if (!inDB) continue;
-              const viewer_jid = jidNormalizedUser(
-                update.key.participant as string
-              );
+    // ev.on(
+    //   "message-receipt.update",
+    //   async (updates: { key: proto.IMessageKey }[]) => {
+    //     try {
+    //       for (const update of updates) {
+    //         if (
+    //           update.key.id &&
+    //           update.key.fromMe &&
+    //           isJidStatusBroadcast(update.key.remoteJid as string)
+    //         ) {
+    //           const inDB = await getStatusInDBResult(update.key.id);
+    //           if (!inDB) continue;
+    //           const viewer_jid = jidNormalizedUser(
+    //             update.key.participant as string
+    //           );
 
-              await saveStatusToMySQL("status_viewers", {
-                viewer_jid,
-                instance_id,
-                status_id: update.key.id,
-                view_date: new Date()
-                  .toISOString()
-                  .slice(0, 19)
-                  .replace("T", " ")
-              });
+    //           await saveStatusToMySQL("status_viewers", {
+    //             viewer_jid,
+    //             instance_id,
+    //             status_id: update.key.id,
+    //             view_date: new Date()
+    //               .toISOString()
+    //               .slice(0, 19)
+    //               .replace("T", " ")
+    //           });
 
-              const viewerCacheKey = `${update.key.id}_${viewer_jid}`;
-              if (cache.has(viewerCacheKey)) continue;
+    //           const viewerCacheKey = `${update.key.id}_${viewer_jid}`;
+    //           if (cache.has(viewerCacheKey)) continue;
 
-              const checkSql = `
-                    SELECT EXISTS(
-                      SELECT 1 
-                      FROM status_viewers 
-                      WHERE status_id = ? AND viewer_jid = ?
-                    ) AS exists_flag;
-                `;
+    //           const checkSql = `
+    //                 SELECT EXISTS(
+    //                   SELECT 1 
+    //                   FROM status_viewers 
+    //                   WHERE status_id = ? AND viewer_jid = ?
+    //                 ) AS exists_flag;
+    //             `;
 
-              const result = await customQuery(checkSql, [
-                update.key.id,
-                viewer_jid
-              ]);
+    //           const result = await customQuery(checkSql, [
+    //             update.key.id,
+    //             viewer_jid
+    //           ]);
 
-              if (result[0].exists_flag === 0) {
-                cache.set(viewerCacheKey, true);
-                const updateSql = `
-                  UPDATE status_updates
-                  SET view_count = view_count + 1
-                  WHERE status_id = ?
-                `;
-                await customQuery(updateSql, [update.key.id]);
-              }
-            }
-          }
-        } catch (error) {
-          log.error(
-            { error, key: { instanceId: instance_id } },
-            "Failed to handle message-reciept updates"
-          );
-        }
-      }
-    );
+    //           if (result[0].exists_flag === 0) {
+    //             cache.set(viewerCacheKey, true);
+    //             const updateSql = `
+    //               UPDATE status_updates
+    //               SET view_count = view_count + 1
+    //               WHERE status_id = ?
+    //             `;
+    //             await customQuery(updateSql, [update.key.id]);
+    //           }
+    //         }
+    //       }
+    //     } catch (error) {
+    //       log.error(
+    //         { error, key: { instanceId: instance_id } },
+    //         "Failed to handle message-reciept updates"
+    //       );
+    //     }
+    //   }
+    // );
 
     ev.on("groups.update", async (updates: Partial<GroupMetadata>[]) => {
       const active = await hasGroups();
