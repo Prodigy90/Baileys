@@ -2,30 +2,144 @@ import pino from "pino";
 import { LRUCache } from "lru-cache";
 import { Pool, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 
+interface BatchItem {
+  priority: number;
+  tableName: string;
+  data: Record<string, any>;
+}
+
+class PriorityQueue<T> {
+  private items: T[] = [];
+
+  enqueue(item: T & { priority: number }): void {
+    let added = false;
+    for (let i = 0; i < this.items.length; i++) {
+      if ((this.items[i] as any).priority > item.priority) {
+        this.items.splice(i, 0, item);
+        added = true;
+        break;
+      }
+    }
+    if (!added) {
+      this.items.push(item);
+    }
+  }
+
+  dequeue(): T | undefined {
+    return this.items.shift();
+  }
+
+  isEmpty(): boolean {
+    return this.items.length === 0;
+  }
+
+  size(): number {
+    return this.items.length;
+  }
+}
+
 export class BatchProcessor {
-  private batchQueues = {
-    messages: new Map<string, any[]>(),
-    status_updates: new Map<string, any[]>(),
-    status_viewers: new Map<string, any[]>(),
-    contacts: new Map<string, any[]>(),
-    chats: new Map<string, any[]>(),
-    groups_metadata: new Map<string, any[]>()
-  };
+  private queues: Map<string, PriorityQueue<BatchItem>> = new Map();
   private processing = false;
   private readonly BATCH_SIZE = 100;
-  private readonly PROCESS_INTERVAL = 1000;
+  private readonly PROCESS_INTERVAL = 5000;
 
   constructor(private pool: Pool, private log: pino.Logger) {
     this.startProcessor();
   }
 
-  public queueItem(tableName: string, data: Record<string, any>) {
-    if (!this.batchQueues[tableName]) return;
-    const key = this.getBatchKey(tableName, data);
-    if (!this.batchQueues[tableName].has(key)) {
-      this.batchQueues[tableName].set(key, []);
+  public queueItem(
+    tableName: string,
+    data: Record<string, any>,
+    priority: number = 1
+  ): void {
+    if (!this.queues.has(tableName)) {
+      this.queues.set(tableName, new PriorityQueue<BatchItem>());
     }
-    this.batchQueues[tableName].get(key)!.push(data);
+
+    this.queues.get(tableName)!.enqueue({
+      priority,
+      tableName,
+      data
+    });
+
+    const currentQueueSize = this.queues.get(tableName)?.size() || 0;
+  }
+
+  private async processBatch(): Promise<void> {
+    if (this.processing) {
+      return;
+    }
+
+    this.processing = true;
+    let retries = 3;
+
+    try {
+      while (retries > 0) {
+        const conn = await this.pool.getConnection();
+
+        try {
+          await conn.beginTransaction();
+
+          for (const [tableName, queue] of this.queues.entries()) {
+            const batch: BatchItem[] = [];
+            const failedItems: BatchItem[] = [];
+
+            while (!queue.isEmpty() && batch.length < this.BATCH_SIZE) {
+              const item = queue.dequeue();
+              if (item) batch.push(item);
+            }
+
+            if (batch.length > 0) {
+              try {
+                await this.executeBatchUpsert(
+                  conn,
+                  tableName,
+                  batch.map((b) => b.data)
+                );
+              } catch (error) {
+                batch.forEach((item) => failedItems.push(item));
+                throw error;
+              }
+            }
+
+            failedItems.forEach((item) => queue.enqueue(item));
+          }
+
+          await conn.commit();
+          break;
+        } catch (error) {
+          await conn.rollback();
+          retries--;
+
+          this.log.error(
+            {
+              error,
+              retriesLeft: retries
+            },
+            "Batch processing failed, retrying..."
+          );
+
+          if (retries === 0) {
+            throw error;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        } finally {
+          conn.release();
+        }
+      }
+    } catch (error) {
+      this.log.error(
+        {
+          error
+        },
+        "Batch processing failed after all retries"
+      );
+      throw error;
+    } finally {
+      this.processing = false;
+    }
   }
 
   private getBatchKey(tableName: string, data: Record<string, any>): string {
@@ -35,42 +149,7 @@ export class BatchProcessor {
       case "status_updates":
         return data.status_id;
       default:
-        return data.id || data.jid || JSON.stringify(data);
-    }
-  }
-
-  private async processBatch() {
-    if (this.processing) return;
-    this.processing = true;
-
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.beginTransaction();
-
-      for (const [tableName, queue] of Object.entries(this.batchQueues)) {
-        if (queue.size === 0) continue;
-
-        const batch = Array.from(queue.values())
-          .flat()
-          .slice(0, this.BATCH_SIZE);
-
-        if (batch.length === 0) continue;
-
-        await this.executeBatchUpsert(conn, tableName, batch);
-
-        for (const item of batch) {
-          const key = this.getBatchKey(tableName, item);
-          queue.delete(key);
-        }
-      }
-
-      await conn.commit();
-    } catch (error) {
-      await conn.rollback();
-      this.log.error({ error }, "Batch processing failed");
-    } finally {
-      conn.release();
-      this.processing = false;
+        return data.id || data.jid || data;
     }
   }
 
@@ -79,23 +158,193 @@ export class BatchProcessor {
     tableName: string,
     batch: Record<string, any>[]
   ) {
-    const columns = Object.keys(batch[0]);
-    const placeholders = batch
-      .map(() => `(${columns.map(() => "?").join(",")})`)
-      .join(",");
+    switch (tableName) {
+      case "status_updates":
+        if (batch[0]?.view_count_increment) {
+          const statusIds = batch.map((item) => item.id);
+          const increments = batch.map((item) => item.view_count_increment);
 
-    const updateClauses = columns
-      .map((col) => `${col} = VALUES(${col})`)
-      .join(",");
+          const query = `
+            UPDATE status_updates 
+            SET view_count = view_count + CASE 
+              ${statusIds.map((_, i) => `WHEN status_id = ? THEN ?`).join(" ")}
+            END
+            WHERE status_id IN (${statusIds.map(() => "?").join(",")})
+          `;
 
-    const query = `
-      INSERT INTO ${tableName} (${columns.join(",")})
-      VALUES ${placeholders}
-      ON DUPLICATE KEY UPDATE ${updateClauses}
-    `;
+          const values = [
+            ...statusIds.flatMap((id, i) => [id, increments[i]]),
+            ...statusIds
+          ];
 
-    const values = batch.flatMap((item) => columns.map((col) => item[col]));
-    await conn.query(query, values);
+          await conn.query(query, values);
+          return;
+        }
+
+        const statusQuery = batch.map((item) => {
+          const data = {
+            instance_id: item.instance_id,
+            status_id: item.status_id,
+            status_message: JSON.stringify(item.status_message),
+            post_date: item.post_date,
+            message_type: item.message_type
+          };
+
+          const columns = Object.keys(data).join(", ");
+          const placeholders = Object.keys(data)
+            .map(() => "?")
+            .join(", ");
+          const updatePlaceholders = Object.keys(data)
+            .map((key) => `\`${key}\` = VALUES(\`${key}\`)`)
+            .join(", ");
+
+          const query = `
+            INSERT INTO status_updates (${columns})
+            VALUES (${placeholders})
+            ON DUPLICATE KEY UPDATE ${updatePlaceholders}
+          `;
+
+          return {
+            query,
+            values: Object.values(data)
+          };
+        });
+
+        try {
+          for (const { query, values } of statusQuery) {
+            await conn.query(query, values);
+          }
+        } catch (error) {
+          throw error;
+        }
+        return;
+
+      case "messages":
+        const query = `
+        INSERT INTO messages (instance_id, message_id, message_data, post_date)
+        VALUES ${batch.map(() => "(?, ?, ?, ?)").join(",")}
+        ON DUPLICATE KEY UPDATE 
+          instance_id = VALUES(instance_id),
+          message_id = VALUES(message_id),
+          message_data = VALUES(message_data),
+          post_date = VALUES(post_date)
+      `;
+
+        const values = batch.flatMap((item) => {
+          const message_data =
+            typeof item.message_data === "object"
+              ? JSON.stringify(item.message_data)
+              : item.message_data;
+
+          return [
+            item.instance_id,
+            item.message_id,
+            message_data,
+            item.post_date
+          ];
+        });
+
+        try {
+          await conn.query(query, values);
+        } catch (error) {
+          throw error;
+        }
+        return;
+
+      case "contacts":
+        const contactQuery = `
+        INSERT INTO contacts (instance_id, jid, contact)
+        VALUES ${batch.map(() => "(?, ?, ?)").join(",")}
+        ON DUPLICATE KEY UPDATE
+          contact = JSON_SET(
+            VALUES(contact),
+            '$.name', IFNULL(
+              JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.name')),
+              JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.name'))
+            ),
+            '$.notify', IFNULL(
+              JSON_UNQUOTE(JSON_EXTRACT(contacts.contact, '$.notify')),
+              JSON_UNQUOTE(JSON_EXTRACT(VALUES(contact), '$.notify'))
+            )
+          )
+      `;
+
+        const contactValues = batch.flatMap((item) => [
+          item.instance_id,
+          item.jid,
+          JSON.stringify(item.contact)
+        ]);
+
+        await conn.query(contactQuery, contactValues);
+        return;
+
+      case "chats":
+        const chatQuery = `
+        INSERT INTO chats (instance_id, jid, chat)
+        VALUES ${batch.map(() => "(?, ?, ?)").join(",")}
+        ON DUPLICATE KEY UPDATE
+         chat = VALUES(chat)
+      `;
+
+        const chatValues = batch.flatMap((item) => [
+          item.instance_id,
+          item.jid,
+          JSON.stringify(item.chat)
+        ]);
+
+        await conn.query(chatQuery, chatValues);
+        return;
+
+      case "groups_metadata":
+        if (batch[0].metadata) {
+          const groupQuery = `
+          INSERT INTO groups_metadata 
+            (instance_id, jid, subject, is_admin, participating, group_index, admin_index, metadata)
+          VALUES ${batch.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(",")}
+          ON DUPLICATE KEY UPDATE 
+            subject = VALUES(subject),
+            is_admin = VALUES(is_admin),
+            participating = VALUES(participating),
+            group_index = VALUES(group_index),
+            admin_index = VALUES(admin_index),
+            metadata = VALUES(metadata)
+        `;
+
+          const groupValues = batch.flatMap((item) => [
+            item.instance_id,
+            item.jid,
+            item.subject || "",
+            item.is_admin || false,
+            item.participating !== false,
+            item.group_index,
+            item.admin_index || 0,
+            JSON.stringify(item.metadata)
+          ]);
+
+          await conn.query(groupQuery, groupValues);
+          return;
+        }
+        return;
+
+      case "status_viewers":
+        const viewerQuery = `
+        INSERT INTO status_viewers 
+          (instance_id, status_id, viewer_jid, view_date)
+        VALUES ${batch.map(() => "(?, ?, ?, ?)").join(",")}
+        ON DUPLICATE KEY UPDATE 
+          view_date = VALUES(view_date)
+      `;
+
+        const viewerValues = batch.flatMap((item) => [
+          item.instance_id,
+          item.status_id,
+          item.viewer_jid,
+          item.view_date
+        ]);
+
+        await conn.query(viewerQuery, viewerValues);
+        return;
+    }
   }
 
   private startProcessor() {
@@ -131,6 +380,21 @@ export class DbHelpers {
       this.log.error({ error, query }, "Database query failed");
       return null;
     }
+  }
+
+  async checkExists(
+    cacheKey: string,
+    query: string,
+    params: any[]
+  ): Promise<boolean> {
+    return (
+      (await this.getFromCacheOrDb<boolean>(
+        cacheKey,
+        query,
+        params,
+        (row) => !!row
+      )) ?? false
+    );
   }
 
   async batchQuery(
