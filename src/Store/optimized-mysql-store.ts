@@ -533,37 +533,47 @@ export class OptimizedMySQLStore {
     return messages;
   }
 
-  async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
-    const inDB = await this.hasGroups();
-    if (!inDB) return [];
+async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
+  const inDB = await this.hasGroups();
+  if (!inDB) return [];
 
-    return (
-      (await this.dbHelpers.getFromCacheOrDb(
-        `${this.instance_id}_all_groups_metadata`,
-        `SELECT metadata FROM groups_metadata WHERE instance_id = ?`,
-        [this.instance_id],
-        (rows) =>
-          Array.isArray(rows)
-            ? (rows
-                .map((row) => {
-                  try {
-                    return typeof row.metadata === "object"
-                      ? row.metadata
-                      : JSON.parse(row.metadata);
-                  } catch (error) {
-                    this.logger.error(
-                      { error, metadata: row.metadata },
-                      "Failed to parse group metadata"
-                    );
-                    return null;
-                  }
-                })
-                .filter(Boolean) as GroupMetadata[])
-            : []
-      )) || []
-    );
+  const cacheKey = `${this.instance_id}_all_groups_metadata`;
+  if (this.cache.has(cacheKey)) {
+    return this.cache.get(cacheKey) as GroupMetadata[];
   }
 
+  try {
+    const rows = await this.customQuery(
+      'SELECT metadata FROM groups_metadata WHERE instance_id = ?',
+      [this.instance_id]
+    );
+
+    const metadata = rows
+      .map((row: any) => {
+        try {
+          return typeof row.metadata === 'object' 
+            ? row.metadata 
+            : JSON.parse(row.metadata);
+        } catch (error) {
+          this.logger.error(
+            { error, metadata: row.metadata },
+            'Failed to parse group metadata'
+          );
+          return null;
+        }
+      })
+      .filter(Boolean) as GroupMetadata[];
+
+    this.cache.set(cacheKey, metadata);
+    return metadata;
+  } catch (error) {
+    this.logger.error(
+      { error, instance_id: this.instance_id },
+      'Failed to load group metadata'
+    );
+    return [];
+  }
+}
   async clearGroupsData(): Promise<void> {
     try {
       await Promise.all([
