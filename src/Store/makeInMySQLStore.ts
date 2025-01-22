@@ -106,7 +106,7 @@ export function makeMySQLStore(
         instance_id VARCHAR(255) NOT NULL,
         jid VARCHAR(255) NOT NULL,
         chat JSON,
-        INDEX idx_instance_timestamp ((instance_id, JSON_EXTRACT(chat, '$.conversationTimestamp'))),
+        INDEX idx_instance_timestamp (instance_id, (JSON_EXTRACT(chat, '$.conversationTimestamp'))),
         UNIQUE(instance_id, jid)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
 
