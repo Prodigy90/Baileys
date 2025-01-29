@@ -74,9 +74,6 @@ export class OptimizedMySQLStore {
     private instance_id: string,
     private skippedGroups: string[]
   ) {
-    this.logger = logger || pino({ level: "info" });
-    this.batchProcessor = new BatchProcessor(pool, this.logger);
-    this.dbHelpers = new DbHelpers(pool, this.logger, this.cache);
     this.cache = new LRUCache({
       max: CACHE_CONFIG.MAX_SIZE,
       ttl: CACHE_CONFIG.TTL.DEFAULT,
@@ -89,6 +86,9 @@ export class OptimizedMySQLStore {
         return null;
       },
     });
+    this.logger = logger || pino({ level: "info" });
+    this.batchProcessor = new BatchProcessor(pool, this.logger);
+    this.dbHelpers = new DbHelpers(pool, this.logger, this.cache);
     this.cacheWarmer = new CacheWarmer(
       pool,
       this.cache,
