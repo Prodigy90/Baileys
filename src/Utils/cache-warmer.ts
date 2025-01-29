@@ -15,23 +15,27 @@ export class CacheWarmer {
   ) {}
 
   async start() {
+    this.stop();
+    
     await this.warmCache();
     this.warmupInterval = setInterval(() => {
       this.warmCache().catch((err) =>
         this.logger.error({ err }, "Cache warming interval failed")
       );
     }, this.warmupIntervalMs);
+    
+    this.logger.info("Cache warming started");
   }
 
   stop() {
     if (this.warmupInterval) {
       clearInterval(this.warmupInterval);
       this.warmupInterval = null;
+      this.logger.info("Cache warming stopped");
     }
   }
 
   private async warmCache() {
-    console.log("starting cache warming");
     if (this.isWarming) {
       this.logger.debug("Cache warming already in progress");
       return;
