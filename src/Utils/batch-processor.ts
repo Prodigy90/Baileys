@@ -60,7 +60,7 @@ export class BatchProcessor {
     this.queues.get(tableName)!.enqueue({
       priority,
       tableName,
-      data
+      data,
     });
 
     const currentQueueSize = this.queues.get(tableName)?.size() || 0;
@@ -115,7 +115,7 @@ export class BatchProcessor {
           this.log.error(
             {
               error,
-              retriesLeft: retries
+              retriesLeft: retries,
             },
             "Batch processing failed, retrying..."
           );
@@ -132,7 +132,7 @@ export class BatchProcessor {
     } catch (error) {
       this.log.error(
         {
-          error
+          error,
         },
         "Batch processing failed after all retries"
       );
@@ -174,47 +174,48 @@ export class BatchProcessor {
 
           const values = [
             ...statusIds.flatMap((id, i) => [id, increments[i]]),
-            ...statusIds
+            ...statusIds,
           ];
 
           await conn.query(query, values);
           return;
         }
 
-        const statusQuery = batch.map((item) => {
-          const data = {
-            instance_id: item.instance_id,
-            status_id: item.status_id,
-            status_message: JSON.stringify(item.status_message),
-            post_date: item.post_date,
-            message_type: item.message_type
-          };
+        try {
+          const columns = [
+            "instance_id",
+            "status_id",
+            "status_message",
+            "post_date",
+            "message_type",
+          ];
 
-          const columns = Object.keys(data).join(", ");
-          const placeholders = Object.keys(data)
-            .map(() => "?")
-            .join(", ");
-          const updatePlaceholders = Object.keys(data)
+          const rowPlaceholders = batch.map(() => "(?, ?, ?, ?, ?)").join(", ");
+
+          const updatePlaceholders = columns
             .map((key) => `\`${key}\` = VALUES(\`${key}\`)`)
             .join(", ");
 
           const query = `
-            INSERT INTO status_updates (${columns})
-            VALUES (${placeholders})
+            INSERT INTO status_updates (${columns.join(", ")})
+            VALUES ${rowPlaceholders}
             ON DUPLICATE KEY UPDATE ${updatePlaceholders}
           `;
 
-          return {
-            query,
-            values: Object.values(data)
-          };
-        });
+          const values = batch.flatMap((item) => [
+            item.instance_id,
+            item.status_id,
+            JSON.stringify(item.status_message),
+            item.post_date,
+            item.message_type,
+          ]);
 
-        try {
-          for (const { query, values } of statusQuery) {
-            await conn.query(query, values);
-          }
+          await conn.query(query, values);
         } catch (error) {
+          this.log.error(
+            { error },
+            "Failed to execute status_updates batch upsert"
+          );
           throw error;
         }
         return;
@@ -240,7 +241,7 @@ export class BatchProcessor {
             item.instance_id,
             item.message_id,
             message_data,
-            item.post_date
+            item.post_date,
           ];
         });
 
@@ -272,7 +273,7 @@ export class BatchProcessor {
         const contactValues = batch.flatMap((item) => [
           item.instance_id,
           item.jid,
-          JSON.stringify(item.contact)
+          JSON.stringify(item.contact),
         ]);
 
         await conn.query(contactQuery, contactValues);
@@ -289,7 +290,7 @@ export class BatchProcessor {
         const chatValues = batch.flatMap((item) => [
           item.instance_id,
           item.jid,
-          JSON.stringify(item.chat)
+          JSON.stringify(item.chat),
         ]);
 
         await conn.query(chatQuery, chatValues);
@@ -318,7 +319,7 @@ export class BatchProcessor {
             item.participating !== false,
             item.group_index,
             item.admin_index || 0,
-            JSON.stringify(item.metadata)
+            JSON.stringify(item.metadata),
           ]);
 
           await conn.query(groupQuery, groupValues);
@@ -339,7 +340,7 @@ export class BatchProcessor {
           item.instance_id,
           item.status_id,
           item.viewer_jid,
-          item.view_date
+          item.view_date,
         ]);
 
         await conn.query(viewerQuery, viewerValues);

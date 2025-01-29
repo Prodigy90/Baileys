@@ -44,7 +44,7 @@ const onDemandMap = new Map<string, string>();
 // Read line interface
 const rl = readline.createInterface({
   input: process.stdin,
-  output: process.stdout
+  output: process.stdout,
 });
 const question = (text: string) =>
   new Promise<string>((resolve) => rl.question(text, resolve));
@@ -59,18 +59,18 @@ const question = (text: string) =>
 // }, 10_000)
 
 const poolConfigSample = {
-  host: "",
-  user: "",
   maxIdle: 5,
-  port: 3307,
-  database: "",
-  password: "",
   queueLimit: 0,
   connectionLimit: 5,
   idleTimeout: 60000,
   enableKeepAlive: true,
   waitForConnections: true,
-  keepAliveInitialDelay: 0
+  keepAliveInitialDelay: 0,
+  host: process.env.MYSQL_HOST,
+  user: process.env.MYSQL_USER,
+  database: process.env.MYSQL_DATABASE,
+  password: process.env.MYSQL_PASSWORD,
+  port: process.env.MYSQL_PORT ? parseInt(process.env.MYSQL_PORT, 10) : undefined,
 };
 
 const mysqlpool = createPool(poolConfigSample);
@@ -96,7 +96,7 @@ const startSock = async () => {
     auth: {
       creds: state.creds,
       /** caching makes the store faster to send/recv messages */
-      keys: makeCacheableSignalKeyStore(state.keys, logger)
+      keys: makeCacheableSignalKeyStore(state.keys, logger),
     },
     msgRetryCounterCache,
     generateHighQualityLinkPreview: true,
@@ -104,7 +104,7 @@ const startSock = async () => {
     // comment the line below out
     // shouldIgnoreJid: jid => isJidBroadcast(jid),
     // implement to handle retries & poll updates
-    getMessage
+    getMessage,
   });
 
   store?.bind(sock.ev);
@@ -170,7 +170,7 @@ const startSock = async () => {
           /// sending WAM EXAMPLE
           const {
             header: { wamVersion, eventSequenceNumber },
-            events
+            events,
           } = JSON.parse(
             await fs.promises.readFile("./boot_analytics_test.json", "utf-8")
           );
@@ -178,7 +178,7 @@ const startSock = async () => {
           const binaryInfo = new BinaryInfo({
             protocolVersion: wamVersion,
             sequence: eventSequenceNumber,
-            events: events
+            events: events,
           });
 
           const buffer = encodeWAM(binaryInfo);
@@ -269,57 +269,74 @@ const startSock = async () => {
 							}
 						  } */
 
-						if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
-							const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text
-							if (text == "requestPlaceholder" && !upsert.requestId) {
-								const messageId = await sock.requestPlaceholderResend(msg.key) 
-								console.log('requested placeholder resync, id=', messageId)
-							} else if (upsert.requestId) {
-								console.log('Message received from phone, id=', upsert.requestId, msg)
-							}
+            if (
+              msg.message?.conversation ||
+              msg.message?.extendedTextMessage?.text
+            ) {
+              const text =
+                msg.message?.conversation ||
+                msg.message?.extendedTextMessage?.text;
+              if (text == "requestPlaceholder" && !upsert.requestId) {
+                const messageId = await sock.requestPlaceholderResend(msg.key);
+                console.log("requested placeholder resync, id=", messageId);
+              } else if (upsert.requestId) {
+                console.log(
+                  "Message received from phone, id=",
+                  upsert.requestId,
+                  msg
+                );
+              }
 
-							// go to an old chat and send this
-							if (text == "onDemandHistSync") {
-								const messageId = await sock.fetchMessageHistory(50, msg.key, msg.messageTimestamp!) 
-								console.log('requested on-demand sync, id=', messageId)
-							}
-						}
+              // go to an old chat and send this
+              if (text == "onDemandHistSync") {
+                const messageId = await sock.fetchMessageHistory(
+                  50,
+                  msg.key,
+                  msg.messageTimestamp!
+                );
+                console.log("requested on-demand sync, id=", messageId);
+              }
+            }
 
-						if(!msg.key.fromMe && doReplies && !isJidNewsletter(msg.key?.remoteJid!)) {
+            if (
+              !msg.key.fromMe &&
+              doReplies &&
+              !isJidNewsletter(msg.key?.remoteJid!)
+            ) {
+              console.log("replying to", msg.key.remoteJid);
+              await sock!.readMessages([msg.key]);
+              await sendMessageWTyping(
+                { text: "Hello there!" },
+                msg.key.remoteJid!
+              );
+            }
+          }
+        }
+      }
 
-							console.log('replying to', msg.key.remoteJid)
-							await sock!.readMessages([msg.key])
-							await sendMessageWTyping({ text: 'Hello there!' }, msg.key.remoteJid!)
-						}
-					}
-				}
-			}
+      // messages updated like status delivered, message deleted etc.
+      if (events["messages.update"]) {
+        console.log(JSON.stringify(events["messages.update"], undefined, 2));
 
-			// messages updated like status delivered, message deleted etc.
-			if(events['messages.update']) {
-				console.log(
-					JSON.stringify(events['messages.update'], undefined, 2)
-				)
+        for (const { key, update } of events["messages.update"]) {
+          if (update.pollUpdates) {
+            const pollCreation = await getMessage(key);
+            if (pollCreation) {
+              console.log(
+                "got poll update, aggregation: ",
+                getAggregateVotesInPollMessage({
+                  message: pollCreation,
+                  pollUpdates: update.pollUpdates,
+                })
+              );
+            }
+          }
+        }
+      }
 
-				for(const { key, update } of events['messages.update']) {
-					if(update.pollUpdates) {
-						const pollCreation = await getMessage(key)
-						if(pollCreation) {
-							console.log(
-								'got poll update, aggregation: ',
-								getAggregateVotesInPollMessage({
-									message: pollCreation,
-									pollUpdates: update.pollUpdates,
-								})
-							)
-						}
-					}
-				}
-			}
-
-			if(events['message-receipt.update']) {
-				console.log(events['message-receipt.update'])
-			}
+      if (events["message-receipt.update"]) {
+        console.log(events["message-receipt.update"]);
+      }
 
       if (events["messages.reaction"]) {
         // console.log(events["messages.reaction"]);

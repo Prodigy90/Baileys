@@ -5,7 +5,7 @@ import {
   ConnectionState,
   GroupMetadataRow,
   GroupMetadataResult,
-  BaileysEventEmitter
+  BaileysEventEmitter,
 } from "../Types";
 import pino from "pino";
 import { proto } from "../../WAProto";
@@ -106,9 +106,29 @@ export function makeMySQLStore(
         instance_id VARCHAR(255) NOT NULL,
         jid VARCHAR(255) NOT NULL,
         chat JSON,
-        INDEX idx_instance_timestamp (instance_id, (JSON_EXTRACT(chat, '$.conversationTimestamp'))),
+        conversation_timestamp TIMESTAMP GENERATED ALWAYS AS (
+            IF(
+                COALESCE(
+                    IF(
+                        JSON_TYPE(JSON_EXTRACT(chat, '$.conversationTimestamp')) = 'INTEGER',
+                        JSON_EXTRACT(chat, '$.conversationTimestamp'),
+                        JSON_EXTRACT(chat, '$.conversationTimestamp.low')
+                    ),
+                    0
+                ) > 0,
+                FROM_UNIXTIME(
+                    IF(
+                        JSON_TYPE(JSON_EXTRACT(chat, '$.conversationTimestamp')) = 'INTEGER',
+                        JSON_EXTRACT(chat, '$.conversationTimestamp'),
+                        JSON_EXTRACT(chat, '$.conversationTimestamp.low')
+                    )
+                ),
+                NULL
+            )
+        ) STORED,
+        INDEX idx_instance_timestamp (instance_id, conversation_timestamp DESC),
         UNIQUE(instance_id, jid)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
 
       // Groups Metadata Table
       `CREATE TABLE IF NOT EXISTS groups_metadata (
@@ -145,7 +165,7 @@ export function makeMySQLStore(
         jid VARCHAR(255) NULL,
         INDEX idx_instance_jid (instance_id, jid),
         UNIQUE(instance_id, jid, username)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
     ];
 
     for (const query of schema) {
@@ -181,6 +201,6 @@ export function makeMySQLStore(
     getAllSavedContacts: store.getAllSavedContacts.bind(store),
     loadAllGroupsMetadata: store.loadAllGroupsMetadata.bind(store),
     getRecentStatusUpdates: store.getRecentStatusUpdates.bind(store),
-    fetchAllGroupsMetadata: store.fetchAllGroupsMetadata.bind(store)
+    fetchAllGroupsMetadata: store.fetchAllGroupsMetadata.bind(store),
   };
 }

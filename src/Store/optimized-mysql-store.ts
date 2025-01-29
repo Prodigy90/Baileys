@@ -1,7 +1,7 @@
 import {
   isJidUser,
   jidNormalizedUser,
-  isJidStatusBroadcast
+  isJidStatusBroadcast,
 } from "../WABinary";
 import {
   Chat,
@@ -14,7 +14,7 @@ import {
   GroupMetadataEntry,
   GroupMetadataResult,
   BaileysEventEmitter,
-  messageTypeMap
+  messageTypeMap,
 } from "../Types";
 import pino from "pino";
 import { toNumber } from "../Utils";
@@ -24,16 +24,46 @@ import { proto } from "../../WAProto";
 import type makeMDSocket from "../Socket";
 import { Pool, RowDataPacket } from "mysql2/promise";
 import { BatchProcessor, DbHelpers } from "../Utils/batch-processor";
+import { CacheWarmer } from "../Utils/cache-warmer";
 
 type WASocket = ReturnType<typeof makeMDSocket>;
 
 const CACHE_CONFIG = {
   MAX_SIZE: 5000,
-  TTL: 1000 * 60 * 15
+  TTL: {
+    // Fast-changing data
+    MESSAGES: 1000 * 60 * 5,
+    STATUS_UPDATES: 1000 * 60 * 5,
+
+    // Medium-changing data
+    CHATS: 1000 * 60 * 15,
+    GROUP_METADATA: 1000 * 60 * 15,
+
+    // Slow-changing data
+    CONTACTS: 1000 * 60 * 30,
+    USER_DATA: 1000 * 60 * 30,
+
+    // Default fallback
+    DEFAULT: 1000 * 60 * 15,
+  },
 };
+
+export type CacheType = keyof typeof CACHE_CONFIG.TTL;
+
+export function getTTL(cacheKey: string): number {
+  if (cacheKey.startsWith("chat_")) return CACHE_CONFIG.TTL.CHATS;
+  if (cacheKey.includes("user_")) return CACHE_CONFIG.TTL.USER_DATA;
+  if (cacheKey.startsWith("msg_")) return CACHE_CONFIG.TTL.MESSAGES;
+  if (cacheKey.startsWith("contact_")) return CACHE_CONFIG.TTL.CONTACTS;
+  if (cacheKey.startsWith("group_")) return CACHE_CONFIG.TTL.GROUP_METADATA;
+  if (cacheKey.startsWith("status_")) return CACHE_CONFIG.TTL.STATUS_UPDATES;
+
+  return CACHE_CONFIG.TTL.DEFAULT;
+}
 
 export class OptimizedMySQLStore {
   private dbHelpers: DbHelpers;
+  private cacheWarmer: CacheWarmer;
   private cache: LRUCache<string, any>;
   state: ConnectionState | null = null;
   private batchProcessor: BatchProcessor;
@@ -45,9 +75,32 @@ export class OptimizedMySQLStore {
     private skippedGroups: string[]
   ) {
     this.logger = logger || pino({ level: "info" });
-    this.cache = new LRUCache({ max: CACHE_CONFIG.MAX_SIZE });
     this.batchProcessor = new BatchProcessor(pool, this.logger);
     this.dbHelpers = new DbHelpers(pool, this.logger, this.cache);
+    this.cache = new LRUCache({
+      max: CACHE_CONFIG.MAX_SIZE,
+      ttl: CACHE_CONFIG.TTL.DEFAULT,
+      ttlAutopurge: true,
+      updateAgeOnGet: true,
+      ttlResolution: 1000,
+      fetchMethod: async (key: string) => {
+        const ttl = getTTL(key);
+        this.cache.ttl = ttl;
+        return null;
+      },
+    });
+    this.cacheWarmer = new CacheWarmer(
+      pool,
+      this.cache,
+      instance_id,
+      this.logger
+    );
+
+    this.cacheWarmer
+      .start()
+      .catch((err) =>
+        this.logger.error({ err }, "Failed to start cache warming")
+      );
   }
 
   /**
@@ -61,7 +114,7 @@ export class OptimizedMySQLStore {
         SELECT chat 
         FROM chats 
         WHERE instance_id = ? 
-        ORDER BY JSON_EXTRACT(chat, '$.conversationTimestamp') DESC
+        ORDER BY conversation_timestamp DESC
         LIMIT ? OFFSET ?
       `,
           [this.instance_id, limit, offset]
@@ -217,7 +270,7 @@ export class OptimizedMySQLStore {
                     : row.association
                 )
               : []
-        )
+        ),
       ])) || [];
 
     return {
@@ -225,7 +278,7 @@ export class OptimizedMySQLStore {
       labels: labels || [],
       contacts: contacts || [],
       messages: messages || [],
-      labelAssociations: labelAssociations || []
+      labelAssociations: labelAssociations || [],
     };
   }
 
@@ -247,7 +300,7 @@ export class OptimizedMySQLStore {
         .map((chat) => ({
           instance_id: this.instance_id,
           jid: chat.id,
-          chat: { ...chat, messages: [] }
+          chat: { ...chat, messages: [] },
         }));
 
       const filteredContacts = contacts
@@ -255,7 +308,7 @@ export class OptimizedMySQLStore {
         .map((contact) => ({
           instance_id: this.instance_id,
           jid: contact.id,
-          contact: contact
+          contact: contact,
         }));
 
       filteredChats.forEach((chat) => {
@@ -286,13 +339,13 @@ export class OptimizedMySQLStore {
         "messages",
         "users",
         "groups_metadata",
-        "groups_status"
+        "groups_status",
       ];
 
       await Promise.all(
         tables.map((table) =>
           this.pool.query(`DELETE FROM ${table} WHERE instance_id = ?`, [
-            this.instance_id
+            this.instance_id,
           ])
         )
       );
@@ -342,7 +395,7 @@ export class OptimizedMySQLStore {
 
       const statusInDBResult = await this.customQuery(statusInDBSql, [
         id,
-        this.instance_id
+        this.instance_id,
       ]);
       return statusInDBResult[0].exists_flag === 1;
     } catch (error) {
@@ -425,7 +478,7 @@ export class OptimizedMySQLStore {
           is_admin: row.is_admin,
           group_index: row.group_index,
           admin_index: row.admin_index,
-          participating: row.participating
+          participating: row.participating,
         };
       }
     );
@@ -533,61 +586,61 @@ export class OptimizedMySQLStore {
     return messages;
   }
 
-async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
-  const inDB = await this.hasGroups();
-  if (!inDB) return [];
+  async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
+    const inDB = await this.hasGroups();
+    if (!inDB) return [];
 
-  const cacheKey = `${this.instance_id}_all_groups_metadata`;
-  if (this.cache.has(cacheKey)) {
-    return this.cache.get(cacheKey) as GroupMetadata[];
+    const cacheKey = `${this.instance_id}_all_groups_metadata`;
+    if (this.cache.has(cacheKey)) {
+      return this.cache.get(cacheKey) as GroupMetadata[];
+    }
+
+    try {
+      const rows = await this.customQuery(
+        "SELECT metadata FROM groups_metadata WHERE instance_id = ?",
+        [this.instance_id]
+      );
+
+      const metadata = rows
+        .map((row: any) => {
+          try {
+            return typeof row.metadata === "object"
+              ? row.metadata
+              : JSON.parse(row.metadata);
+          } catch (error) {
+            this.logger.error(
+              { error, metadata: row.metadata },
+              "Failed to parse group metadata"
+            );
+            return null;
+          }
+        })
+        .filter(Boolean) as GroupMetadata[];
+
+      this.cache.set(cacheKey, metadata);
+      return metadata;
+    } catch (error) {
+      this.logger.error(
+        { error, instance_id: this.instance_id },
+        "Failed to load group metadata"
+      );
+      return [];
+    }
   }
-
-  try {
-    const rows = await this.customQuery(
-      'SELECT metadata FROM groups_metadata WHERE instance_id = ?',
-      [this.instance_id]
-    );
-
-    const metadata = rows
-      .map((row: any) => {
-        try {
-          return typeof row.metadata === 'object' 
-            ? row.metadata 
-            : JSON.parse(row.metadata);
-        } catch (error) {
-          this.logger.error(
-            { error, metadata: row.metadata },
-            'Failed to parse group metadata'
-          );
-          return null;
-        }
-      })
-      .filter(Boolean) as GroupMetadata[];
-
-    this.cache.set(cacheKey, metadata);
-    return metadata;
-  } catch (error) {
-    this.logger.error(
-      { error, instance_id: this.instance_id },
-      'Failed to load group metadata'
-    );
-    return [];
-  }
-}
   async clearGroupsData(): Promise<void> {
     try {
       await Promise.all([
         this.customQuery(`DELETE FROM groups_metadata WHERE instance_id = ?`, [
-          this.instance_id
+          this.instance_id,
         ]),
         this.customQuery(`DELETE FROM groups_status WHERE instance_id = ?`, [
-          this.instance_id
-        ])
+          this.instance_id,
+        ]),
       ]);
 
       const cacheKeys = [
         `${this.instance_id}_all_groups_metadata`,
-        `${this.instance_id}_hasGroups`
+        `${this.instance_id}_hasGroups`,
       ];
       cacheKeys.forEach((key) => this.cache.delete(key));
 
@@ -668,21 +721,21 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
            WHERE instance_id = ? AND is_admin = 1 AND participating = 1
            ORDER BY admin_index ASC`,
             [this.instance_id]
-          )
+          ),
         ]);
 
         return {
           allGroups: allGroups.map((group: any) => ({
             id: group.id,
             subject: group.subject,
-            groupIndex: group.groupIndex
+            groupIndex: group.groupIndex,
           })),
           adminGroups: adminGroups.map((group: any) => ({
             id: group.id,
             subject: group.subject,
             adminIndex: group.adminIndex,
-            participants: group.participants.map((p: any) => p.id) || []
-          }))
+            participants: group.participants.map((p: any) => p.id) || [],
+          })),
         };
       } catch (error) {
         this.logger.error(
@@ -719,7 +772,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
             announce,
             isCommunity,
             participants,
-            isCommunityAnnounce
+            isCommunityAnnounce,
           } = metadata;
           const admin = await this.isUserAdminOrSuperAdmin(participants);
 
@@ -742,7 +795,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
               id,
               subject: name,
               participants: participants.map((p) => p.id),
-              adminIndex
+              adminIndex,
             });
           }
 
@@ -752,7 +805,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
             groupIndex,
             subject: name,
             isAdmin: admin,
-            adminIndex: admin ? adminIndex : 0
+            adminIndex: admin ? adminIndex : 0,
           });
         }
 
@@ -769,8 +822,8 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                 g.isAdmin,
                 g.groupIndex,
                 g.adminIndex,
-                JSON.stringify(g.metadata)
-              ])
+                JSON.stringify(g.metadata),
+              ]),
             ]
           );
 
@@ -817,7 +870,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                 .map((chat) => ({
                   instance_id: this.instance_id,
                   jid: chat.id,
-                  chat: { ...chat, messages: [] }
+                  chat: { ...chat, messages: [] },
                 }));
 
               filteredChats.forEach((chat) =>
@@ -831,13 +884,13 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                 .map((contact) => ({
                   instance_id: this.instance_id,
                   jid: contact.id,
-                  contact: contact
+                  contact: contact,
                 }));
 
               filteredContacts.forEach((contact) =>
                 this.batchProcessor.queueItem("contacts", contact)
               );
-            })()
+            })(),
           ]);
         } catch (error) {
           this.logger.error(
@@ -861,7 +914,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
           .map((chat) => ({
             instance_id: this.instance_id,
             jid: chat.id,
-            chat: { ...chat, messages: [] }
+            chat: { ...chat, messages: [] },
           }));
 
         filteredChats.forEach((chat) =>
@@ -880,7 +933,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
             this.batchProcessor.queueItem("contacts", {
               instance_id: this.instance_id,
               jid: contact.id,
-              contact: contact
+              contact: contact,
             });
           });
       } catch (error) {
@@ -907,7 +960,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                     instance_id: this.instance_id,
                     message_id: message.key.id,
                     message_data: message,
-                    post_date: localTime
+                    post_date: localTime,
                   },
                   2
                 );
@@ -925,7 +978,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                         status_id: message.key.id,
                         status_message: message,
                         post_date: localTime,
-                        message_type: messageType
+                        message_type: messageType,
                       },
                       3
                     );
@@ -935,7 +988,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                 const remoteJid = message.key.remoteJid as string;
                 const [chat, contact] = await Promise.all([
                   this.getChatById(remoteJid),
-                  this.getContactById(remoteJid)
+                  this.getContactById(remoteJid),
                 ]);
 
                 if (
@@ -948,8 +1001,8 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                     jid: remoteJid,
                     contact: {
                       ...contact,
-                      notify: message.pushName
-                    }
+                      notify: message.pushName,
+                    },
                   });
                 }
 
@@ -960,8 +1013,8 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                     chat: {
                       id: remoteJid,
                       conversationTimestamp: toNumber(message.messageTimestamp),
-                      unreadCount: 1
-                    }
+                      unreadCount: 1,
+                    },
                   });
                 }
 
@@ -971,8 +1024,8 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                     jid: remoteJid,
                     contact: {
                       id: remoteJid,
-                      notify: message.pushName || ""
-                    }
+                      notify: message.pushName || "",
+                    },
                   });
                 }
               }
@@ -1014,7 +1067,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                   view_date: new Date()
                     .toISOString()
                     .slice(0, 19)
-                    .replace("T", " ")
+                    .replace("T", " "),
                 });
 
                 const exists = await this.dbHelpers.checkExists(
@@ -1027,7 +1080,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                   this.cache.set(viewerCacheKey, true);
                   this.batchProcessor.queueItem("status_updates", {
                     id: update.key.id,
-                    view_count_increment: 1
+                    view_count_increment: 1,
                   });
                 }
               }
@@ -1071,7 +1124,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
               participating: groupData.participating,
               group_index: groupData.group_index,
               admin_index: groupData.admin_index,
-              metadata: metadata
+              metadata: metadata,
             });
           })
         );
@@ -1105,7 +1158,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                 announce,
                 isCommunity,
                 participants,
-                isCommunityAnnounce
+                isCommunityAnnounce,
               } = group;
               const admin = await this.isUserAdminOrSuperAdmin(participants);
 
@@ -1147,7 +1200,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
               participating: true,
               group_index: currentGroupIndex,
               admin_index: currentAdminIndex,
-              metadata: group
+              metadata: group,
             });
           });
         } catch (error) {
@@ -1168,7 +1221,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
 
         const [{ jid }, is_group_admin] = await Promise.all([
           this.getUserData(),
-          this.isUserGroupAdmin(id)
+          this.isUserGroupAdmin(id),
         ]);
 
         if (
@@ -1195,7 +1248,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
               ...participants.map((id) => ({
                 id,
                 isAdmin: false,
-                isSuperAdmin: false
+                isSuperAdmin: false,
               }))
             );
             break;
@@ -1227,7 +1280,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
                 ...participant,
                 isAdmin: participants.includes(participant.id)
                   ? action === "promote"
-                  : participant.isAdmin
+                  : participant.isAdmin,
               })
             );
 
@@ -1254,7 +1307,7 @@ async loadAllGroupsMetadata(): Promise<GroupMetadata[]> {
           participating,
           group_index: groupData.group_index,
           admin_index: currentAdminIndex,
-          metadata: metadata
+          metadata: metadata,
         });
       } catch (error) {
         this.logger.error(
