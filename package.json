@@ -46,6 +46,7 @@
     "axios": "^1.6.0",
     "libsignal": "github:vinikjkkj/libsignal-node",
     "lodash": "^4.17.21",
+    "lru-cache": "^11.1.0",
     "moment-timezone": "^0.5.48",
     "music-metadata": "^7.12.3",
     "mysql2": "^3.14.0",
@@ -55,6 +56,7 @@
   },
   "devDependencies": {
     "@types/jest": "^27.5.1",
+    "@types/lru-cache": "^7.10.10",
     "@types/node": "^16.0.0",
     "@types/ws": "^8.0.0",
     "conventional-changelog-cli": "^2.2.2",

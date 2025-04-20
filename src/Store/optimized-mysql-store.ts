@@ -1,7 +1,7 @@
 import {
   isJidUser,
   jidNormalizedUser,
-  isJidStatusBroadcast,
+  isJidStatusBroadcast
 } from "../WABinary";
 import {
   Chat,
@@ -14,7 +14,7 @@ import {
   GroupMetadataRow,
   GroupMetadataEntry,
   GroupMetadataResult,
-  BaileysEventEmitter,
+  BaileysEventEmitter
 } from "../Types";
 import pino from "pino";
 import { toNumber } from "../Utils";
@@ -44,8 +44,8 @@ const CACHE_CONFIG = {
     USER_DATA: 1000 * 60 * 30,
 
     // Default fallback
-    DEFAULT: 1000 * 60 * 15,
-  },
+    DEFAULT: 1000 * 60 * 15
+  }
 };
 
 export type CacheType = keyof typeof CACHE_CONFIG.TTL;
@@ -74,7 +74,7 @@ export class OptimizedMySQLStore {
     private instance_id: string,
     private skippedGroups: string[]
   ) {
-    this.cache = new LRUCache({
+    this.cache = new LRUCache<string, any>({
       max: CACHE_CONFIG.MAX_SIZE,
       ttl: CACHE_CONFIG.TTL.DEFAULT,
       ttlAutopurge: true,
@@ -84,7 +84,7 @@ export class OptimizedMySQLStore {
         const ttl = getTTL(key);
         this.cache.ttl = ttl;
         return null;
-      },
+      }
     });
     this.logger = logger || pino({ level: "info" });
     this.batchProcessor = new BatchProcessor(pool, this.logger);
@@ -270,7 +270,7 @@ export class OptimizedMySQLStore {
                     : row.association
                 )
               : []
-        ),
+        )
       ])) || [];
 
     return {
@@ -278,7 +278,7 @@ export class OptimizedMySQLStore {
       labels: labels || [],
       contacts: contacts || [],
       messages: messages || [],
-      labelAssociations: labelAssociations || [],
+      labelAssociations: labelAssociations || []
     };
   }
 
@@ -300,7 +300,7 @@ export class OptimizedMySQLStore {
         .map((chat) => ({
           instance_id: this.instance_id,
           jid: chat.id,
-          chat: { ...chat, messages: [] },
+          chat: { ...chat, messages: [] }
         }));
 
       const filteredContacts = contacts
@@ -308,7 +308,7 @@ export class OptimizedMySQLStore {
         .map((contact) => ({
           instance_id: this.instance_id,
           jid: contact.id,
-          contact: contact,
+          contact: contact
         }));
 
       filteredChats.forEach((chat) => {
@@ -339,13 +339,13 @@ export class OptimizedMySQLStore {
         "messages",
         "users",
         "groups_metadata",
-        "groups_status",
+        "groups_status"
       ];
 
       await Promise.all(
         tables.map((table) =>
           this.pool.query(`DELETE FROM ${table} WHERE instance_id = ?`, [
-            this.instance_id,
+            this.instance_id
           ])
         )
       );
@@ -395,7 +395,7 @@ export class OptimizedMySQLStore {
 
       const statusInDBResult = await this.customQuery(statusInDBSql, [
         id,
-        this.instance_id,
+        this.instance_id
       ]);
       return statusInDBResult[0].exists_flag === 1;
     } catch (error) {
@@ -478,7 +478,7 @@ export class OptimizedMySQLStore {
           is_admin: row.is_admin,
           group_index: row.group_index,
           admin_index: row.admin_index,
-          participating: row.participating,
+          participating: row.participating
         };
       }
     );
@@ -631,16 +631,16 @@ export class OptimizedMySQLStore {
     try {
       await Promise.all([
         this.customQuery(`DELETE FROM groups_metadata WHERE instance_id = ?`, [
-          this.instance_id,
+          this.instance_id
         ]),
         this.customQuery(`DELETE FROM groups_status WHERE instance_id = ?`, [
-          this.instance_id,
-        ]),
+          this.instance_id
+        ])
       ]);
 
       const cacheKeys = [
         `${this.instance_id}_all_groups_metadata`,
-        `${this.instance_id}_hasGroups`,
+        `${this.instance_id}_hasGroups`
       ];
       cacheKeys.forEach((key) => this.cache.delete(key));
 
@@ -721,21 +721,21 @@ export class OptimizedMySQLStore {
            WHERE instance_id = ? AND is_admin = 1 AND participating = 1
            ORDER BY admin_index ASC`,
             [this.instance_id]
-          ),
+          )
         ]);
 
         return {
           allGroups: allGroups.map((group: any) => ({
             id: group.id,
             subject: group.subject,
-            groupIndex: group.groupIndex,
+            groupIndex: group.groupIndex
           })),
           adminGroups: adminGroups.map((group: any) => ({
             id: group.id,
             subject: group.subject,
             adminIndex: group.adminIndex,
-            participants: group.participants.map((p: any) => p.id) || [],
-          })),
+            participants: group.participants.map((p: any) => p.id) || []
+          }))
         };
       } catch (error) {
         this.logger.error(
@@ -772,7 +772,7 @@ export class OptimizedMySQLStore {
             announce,
             isCommunity,
             participants,
-            isCommunityAnnounce,
+            isCommunityAnnounce
           } = metadata;
           const admin = await this.isUserAdminOrSuperAdmin(participants);
 
@@ -795,7 +795,7 @@ export class OptimizedMySQLStore {
               id,
               subject: name,
               participants: participants.map((p) => p.id),
-              adminIndex,
+              adminIndex
             });
           }
 
@@ -805,7 +805,7 @@ export class OptimizedMySQLStore {
             groupIndex,
             subject: name,
             isAdmin: admin,
-            adminIndex: admin ? adminIndex : 0,
+            adminIndex: admin ? adminIndex : 0
           });
         }
 
@@ -822,8 +822,8 @@ export class OptimizedMySQLStore {
                 g.isAdmin,
                 g.groupIndex,
                 g.adminIndex,
-                JSON.stringify(g.metadata),
-              ]),
+                JSON.stringify(g.metadata)
+              ])
             ]
           );
 
@@ -870,7 +870,7 @@ export class OptimizedMySQLStore {
                 .map((chat) => ({
                   instance_id: this.instance_id,
                   jid: chat.id,
-                  chat: { ...chat, messages: [] },
+                  chat: { ...chat, messages: [] }
                 }));
 
               filteredChats.forEach((chat) =>
@@ -884,13 +884,13 @@ export class OptimizedMySQLStore {
                 .map((contact) => ({
                   instance_id: this.instance_id,
                   jid: contact.id,
-                  contact: contact,
+                  contact: contact
                 }));
 
               filteredContacts.forEach((contact) =>
                 this.batchProcessor.queueItem("contacts", contact)
               );
-            })(),
+            })()
           ]);
         } catch (error) {
           this.logger.error(
@@ -914,7 +914,7 @@ export class OptimizedMySQLStore {
           .map((chat) => ({
             instance_id: this.instance_id,
             jid: chat.id,
-            chat: { ...chat, messages: [] },
+            chat: { ...chat, messages: [] }
           }));
 
         filteredChats.forEach((chat) =>
@@ -933,7 +933,7 @@ export class OptimizedMySQLStore {
             this.batchProcessor.queueItem("contacts", {
               instance_id: this.instance_id,
               jid: contact.id,
-              contact: contact,
+              contact: contact
             });
           });
       } catch (error) {
@@ -960,7 +960,7 @@ export class OptimizedMySQLStore {
                     instance_id: this.instance_id,
                     message_id: message.key.id,
                     message_data: message,
-                    post_date: localTime,
+                    post_date: localTime
                   },
                   2
                 );
@@ -978,7 +978,7 @@ export class OptimizedMySQLStore {
                         status_id: message.key.id,
                         status_message: message,
                         post_date: localTime,
-                        message_type: messageType,
+                        message_type: messageType
                       },
                       3
                     );
@@ -988,7 +988,7 @@ export class OptimizedMySQLStore {
                 const remoteJid = message.key.remoteJid as string;
                 const [chat, contact] = await Promise.all([
                   this.getChatById(remoteJid),
-                  this.getContactById(remoteJid),
+                  this.getContactById(remoteJid)
                 ]);
 
                 if (
@@ -1001,8 +1001,8 @@ export class OptimizedMySQLStore {
                     jid: remoteJid,
                     contact: {
                       ...contact,
-                      notify: message.pushName,
-                    },
+                      notify: message.pushName
+                    }
                   });
                 }
 
@@ -1013,8 +1013,8 @@ export class OptimizedMySQLStore {
                     chat: {
                       id: remoteJid,
                       conversationTimestamp: toNumber(message.messageTimestamp),
-                      unreadCount: 1,
-                    },
+                      unreadCount: 1
+                    }
                   });
                 }
 
@@ -1024,8 +1024,8 @@ export class OptimizedMySQLStore {
                     jid: remoteJid,
                     contact: {
                       id: remoteJid,
-                      notify: message.pushName || "",
-                    },
+                      notify: message.pushName || ""
+                    }
                   });
                 }
               }
@@ -1067,7 +1067,7 @@ export class OptimizedMySQLStore {
                   view_date: new Date()
                     .toISOString()
                     .slice(0, 19)
-                    .replace("T", " "),
+                    .replace("T", " ")
                 });
 
                 const exists = await this.dbHelpers.checkExists(
@@ -1080,7 +1080,7 @@ export class OptimizedMySQLStore {
                   this.cache.set(viewerCacheKey, true);
                   this.batchProcessor.queueItem("status_updates", {
                     id: update.key.id,
-                    view_count_increment: 1,
+                    view_count_increment: 1
                   });
                 }
               }
@@ -1124,7 +1124,7 @@ export class OptimizedMySQLStore {
               participating: groupData.participating,
               group_index: groupData.group_index,
               admin_index: groupData.admin_index,
-              metadata: metadata,
+              metadata: metadata
             });
           })
         );
@@ -1158,7 +1158,7 @@ export class OptimizedMySQLStore {
                 announce,
                 isCommunity,
                 participants,
-                isCommunityAnnounce,
+                isCommunityAnnounce
               } = group;
               const admin = await this.isUserAdminOrSuperAdmin(participants);
 
@@ -1200,7 +1200,7 @@ export class OptimizedMySQLStore {
               participating: true,
               group_index: currentGroupIndex,
               admin_index: currentAdminIndex,
-              metadata: group,
+              metadata: group
             });
           });
         } catch (error) {
@@ -1221,7 +1221,7 @@ export class OptimizedMySQLStore {
 
         const [{ jid }, is_group_admin] = await Promise.all([
           this.getUserData(),
-          this.isUserGroupAdmin(id),
+          this.isUserGroupAdmin(id)
         ]);
 
         if (
@@ -1248,7 +1248,7 @@ export class OptimizedMySQLStore {
               ...participants.map((id) => ({
                 id,
                 isAdmin: false,
-                isSuperAdmin: false,
+                isSuperAdmin: false
               }))
             );
             break;
@@ -1280,7 +1280,7 @@ export class OptimizedMySQLStore {
                 ...participant,
                 isAdmin: participants.includes(participant.id)
                   ? action === "promote"
-                  : participant.isAdmin,
+                  : participant.isAdmin
               })
             );
 
@@ -1307,7 +1307,7 @@ export class OptimizedMySQLStore {
           participating,
           group_index: groupData.group_index,
           admin_index: currentAdminIndex,
-          metadata: metadata,
+          metadata: metadata
         });
       } catch (error) {
         this.logger.error(
