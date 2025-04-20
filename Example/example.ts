@@ -17,12 +17,13 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
-  getAggregateVotesInPollMessage,
+  getAggregateVotesInPollMessage
 } from "../src";
 //import MAIN_LOGGER from '../src/Utils/logger'
 import open from "open";
 import fs from "fs";
 import P from "pino";
+import qrcode from "qrcode-terminal";
 import { createPool } from "mysql2/promise";
 
 const logger = P(
@@ -43,7 +44,7 @@ const onDemandMap = new Map<string, string>();
 // Read line interface
 const rl = readline.createInterface({
   input: process.stdin,
-  output: process.stdout,
+  output: process.stdout
 });
 const question = (text: string) =>
   new Promise<string>((resolve) => rl.question(text, resolve));
@@ -60,7 +61,9 @@ const poolConfigSample = {
   user: process.env.MYSQL_USER,
   database: process.env.MYSQL_DATABASE,
   password: process.env.MYSQL_PASSWORD,
-  port: process.env.MYSQL_PORT ? parseInt(process.env.MYSQL_PORT, 10) : undefined,
+  port: process.env.MYSQL_PORT
+    ? parseInt(process.env.MYSQL_PORT, 10)
+    : undefined
 };
 
 const mysqlpool = createPool(poolConfigSample);
@@ -86,7 +89,7 @@ const startSock = async () => {
     auth: {
       creds: state.creds,
       /** caching makes the store faster to send/recv messages */
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
+      keys: makeCacheableSignalKeyStore(state.keys, logger)
     },
     msgRetryCounterCache,
     generateHighQualityLinkPreview: true,
@@ -94,7 +97,7 @@ const startSock = async () => {
     // comment the line below out
     // shouldIgnoreJid: jid => isJidBroadcast(jid),
     // implement to handle retries & poll updates
-    getMessage,
+    getMessage
   });
 
   store?.bind(sock.ev);
@@ -160,7 +163,7 @@ const startSock = async () => {
           /// sending WAM EXAMPLE
           const {
             header: { wamVersion, eventSequenceNumber },
-            events,
+            events
           } = JSON.parse(
             await fs.promises.readFile("./boot_analytics_test.json", "utf-8")
           );
@@ -168,13 +171,17 @@ const startSock = async () => {
           const binaryInfo = new BinaryInfo({
             protocolVersion: wamVersion,
             sequence: eventSequenceNumber,
-            events: events,
+            events: events
           });
 
           const buffer = encodeWAM(binaryInfo);
 
           const result = await sock.sendWAMBuffer(buffer);
           console.log(result);
+        }
+
+        if (update.qr) {
+          qrcode.generate(update.qr, { small: true });
         }
 
         console.log("connection update", update);
@@ -316,7 +323,7 @@ const startSock = async () => {
                 "got poll update, aggregation: ",
                 getAggregateVotesInPollMessage({
                   message: pollCreation,
-                  pollUpdates: update.pollUpdates,
+                  pollUpdates: update.pollUpdates
                 })
               );
             }
