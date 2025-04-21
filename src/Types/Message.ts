@@ -1,36 +1,29 @@
-import { AxiosRequestConfig } from "axios";
-import type { Logger } from "pino";
-import type { Readable } from "stream";
-import type { URL } from "url";
-import { proto } from "../../WAProto";
-import { MEDIA_HKDF_KEY_MAPPING } from "../Defaults";
-import { BinaryNode } from "../WABinary";
-import type { GroupMetadata } from "./GroupMetadata";
-import { CacheStore } from "./Socket";
+import { AxiosRequestConfig } from 'axios'
+import type { Readable } from 'stream'
+import type { URL } from 'url'
+import { proto } from '../../WAProto'
+import { MEDIA_HKDF_KEY_MAPPING } from '../Defaults'
+import { BinaryNode } from '../WABinary'
+import type { GroupMetadata } from './GroupMetadata'
+import { CacheStore } from './Socket'
 
 // export the WAMessage Prototypes
-export { proto as WAProto };
-export type WAMessage = proto.IWebMessageInfo;
-export type WAMessageContent = proto.IMessage;
-export type WAContactMessage = proto.Message.IContactMessage;
-export type WAContactsArrayMessage = proto.Message.IContactsArrayMessage;
-export type WAMessageKey = proto.IMessageKey;
-export type WATextMessage = proto.Message.IExtendedTextMessage;
-export type WAContextInfo = proto.IContextInfo;
-export type WALocationMessage = proto.Message.ILocationMessage;
-export type WAGenericMediaMessage =
-  | proto.Message.IVideoMessage
-  | proto.Message.IImageMessage
-  | proto.Message.IAudioMessage
-  | proto.Message.IDocumentMessage
-  | proto.Message.IStickerMessage;
-// eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars
-export import WAMessageStubType = proto.WebMessageInfo.StubType;
-// eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars
-export import WAMessageStatus = proto.WebMessageInfo.Status;
-export type WAMediaPayloadURL = { url: URL | string };
-export type WAMediaPayloadStream = { stream: Readable };
-export type WAMediaUpload = Buffer | WAMediaPayloadStream | WAMediaPayloadURL;
+export { proto as WAProto }
+export type WAMessage = proto.IWebMessageInfo
+export type WAMessageContent = proto.IMessage
+export type WAContactMessage = proto.Message.IContactMessage
+export type WAContactsArrayMessage = proto.Message.IContactsArrayMessage
+export type WAMessageKey = proto.IMessageKey
+export type WATextMessage = proto.Message.IExtendedTextMessage
+export type WAContextInfo = proto.IContextInfo
+export type WALocationMessage = proto.Message.ILocationMessage
+export type WAGenericMediaMessage = proto.Message.IVideoMessage | proto.Message.IImageMessage | proto.Message.IAudioMessage | proto.Message.IDocumentMessage | proto.Message.IStickerMessage
+export const WAMessageStubType = proto.WebMessageInfo.StubType
+export const WAMessageStatus = proto.WebMessageInfo.Status
+import { ILogger } from '../Utils/logger'
+export type WAMediaPayloadURL = { url: URL | string }
+export type WAMediaPayloadStream = { stream: Readable }
+export type WAMediaUpload = Buffer | WAMediaPayloadStream | WAMediaPayloadURL
 /** Set of message types that are supported by the library */
 export type MessageType = keyof proto.Message;
 
@@ -280,11 +273,11 @@ export type WAMediaUploadFunction = (
 ) => Promise<{ mediaUrl: string; directPath: string }>;
 
 export type MediaGenerationOptions = {
-  logger?: Logger;
-  mediaTypeOverride?: MediaType;
-  upload: WAMediaUploadFunction;
-  /** cache media so it does not have to be uploaded again */
-  mediaCache?: CacheStore;
+	logger?: ILogger
+    mediaTypeOverride?: MediaType
+    upload: WAMediaUploadFunction
+    /** cache media so it does not have to be uploaded again */
+    mediaCache?: CacheStore
 
   mediaUploadTimeoutMs?: number;
 
@@ -333,14 +326,11 @@ export type MediaDecryptionKeyInfo = {
   macKey?: Buffer;
 };
 
-export type MinimalMessage = Pick<
-  proto.IWebMessageInfo,
-  "key" | "messageTimestamp"
->;
+export type MinimalMessage = Pick<proto.IWebMessageInfo, 'key' | 'messageTimestamp'>
 
 export const messageTypeMap: Record<string, string> = {
-  extendedTextMessage: "text",
-  audioMessage: "audio",
-  videoMessage: "video",
-  imageMessage: "image"
-};
+	extendedTextMessage: 'text',
+	audioMessage: 'audio',
+	videoMessage: 'video',
+	imageMessage: 'image'
+}

@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { Boom } from "@hapi/boom";
-import NodeCache from "node-cache";
+import NodeCache from "@cacheable/node-cache";
 import readline from "readline";
 import makeWASocket, {
   proto,
@@ -17,12 +17,12 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
-  getAggregateVotesInPollMessage,
+  getAggregateVotesInPollMessage
 } from "../src";
 //import MAIN_LOGGER from '../src/Utils/logger'
-import open from "open";
 import fs from "fs";
 import P from "pino";
+import qrcode from "qrcode-terminal";
 import { createPool } from "mysql2/promise";
 
 const logger = P(
@@ -31,7 +31,6 @@ const logger = P(
 );
 logger.level = "info";
 
-const useStore = !process.argv.includes("--no-store");
 const doReplies = process.argv.includes("--do-reply");
 const usePairingCode = process.argv.includes("--use-pairing-code");
 
@@ -44,19 +43,10 @@ const onDemandMap = new Map<string, string>();
 // Read line interface
 const rl = readline.createInterface({
   input: process.stdin,
-  output: process.stdout,
+  output: process.stdout
 });
 const question = (text: string) =>
   new Promise<string>((resolve) => rl.question(text, resolve));
-
-// the store maintains the data of the WA connection in memory
-// can be written out to a file & read from it
-// const store = useStore ? makeInMemoryStore({ logger }) : undefined
-// store?.readFromFile('./baileys_store_multi.json')
-// // save every 10s
-// setInterval(() => {
-// 	store?.writeToFile('./baileys_store_multi.json')
-// }, 10_000)
 
 const poolConfigSample = {
   maxIdle: 5,
@@ -70,7 +60,9 @@ const poolConfigSample = {
   user: process.env.MYSQL_USER,
   database: process.env.MYSQL_DATABASE,
   password: process.env.MYSQL_PASSWORD,
-  port: process.env.MYSQL_PORT ? parseInt(process.env.MYSQL_PORT, 10) : undefined,
+  port: process.env.MYSQL_PORT
+    ? parseInt(process.env.MYSQL_PORT, 10)
+    : undefined
 };
 
 const mysqlpool = createPool(poolConfigSample);
@@ -96,7 +88,7 @@ const startSock = async () => {
     auth: {
       creds: state.creds,
       /** caching makes the store faster to send/recv messages */
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
+      keys: makeCacheableSignalKeyStore(state.keys, logger)
     },
     msgRetryCounterCache,
     generateHighQualityLinkPreview: true,
@@ -104,7 +96,7 @@ const startSock = async () => {
     // comment the line below out
     // shouldIgnoreJid: jid => isJidBroadcast(jid),
     // implement to handle retries & poll updates
-    getMessage,
+    getMessage
   });
 
   store?.bind(sock.ev);
@@ -170,7 +162,7 @@ const startSock = async () => {
           /// sending WAM EXAMPLE
           const {
             header: { wamVersion, eventSequenceNumber },
-            events,
+            events
           } = JSON.parse(
             await fs.promises.readFile("./boot_analytics_test.json", "utf-8")
           );
@@ -178,13 +170,17 @@ const startSock = async () => {
           const binaryInfo = new BinaryInfo({
             protocolVersion: wamVersion,
             sequence: eventSequenceNumber,
-            events: events,
+            events: events
           });
 
           const buffer = encodeWAM(binaryInfo);
 
           const result = await sock.sendWAMBuffer(buffer);
           console.log(result);
+        }
+
+        if (update.qr) {
+          qrcode.generate(update.qr, { small: true });
         }
 
         console.log("connection update", update);
@@ -245,11 +241,11 @@ const startSock = async () => {
 								  {}
 								)
 
-								
+
 								const chatId = onDemandMap.get(
 									historySyncNotification!.peerDataRequestSessionId!
 								)
-								
+
 								console.log(messages)
 
 							  onDemandMap.delete(
@@ -326,7 +322,7 @@ const startSock = async () => {
                 "got poll update, aggregation: ",
                 getAggregateVotesInPollMessage({
                   message: pollCreation,
-                  pollUpdates: update.pollUpdates,
+                  pollUpdates: update.pollUpdates
                 })
               );
             }
@@ -368,6 +364,56 @@ const startSock = async () => {
         // console.log("chats deleted ", events["chats.delete"]);
       }
     }
+  );
+
+  // Add a command handler for testing status functions
+  rl.on("line", async (line) => {
+    const [command, ...args] = line.trim().split(" ");
+
+    try {
+      switch (command) {
+        case "status":
+          // Get recent status updates
+          const statuses = await store.getRecentStatusUpdates({ limit: 5 });
+          console.log(`Retrieved ${statuses.length} recent status updates:`);
+          statuses.forEach((status, i) => {
+            console.log(
+              `${i + 1}. ID: ${status.key?.id}, Views: ${
+                (status as any).view_count
+              }, Type: ${
+                (status as any).media_type || (status as any).message_type
+              }`
+            );
+          });
+          break;
+
+        case "cleanup":
+          // Run status cleanup
+          const viewerDays = parseInt(args[0] || "7");
+          const countDays = parseInt(args[1] || "30");
+          console.log(
+            `Running cleanup (viewers: ${viewerDays} days, counts: ${countDays} days)...`
+          );
+          await store.cleanupStatusData(viewerDays, countDays);
+          console.log("Cleanup completed");
+          break;
+
+        case "help":
+          console.log("Available commands:");
+          console.log("  status - Show recent status updates");
+          console.log(
+            "  cleanup [viewerDays] [countDays] - Run status cleanup"
+          );
+          console.log("  help - Show this help message");
+          break;
+      }
+    } catch (error) {
+      console.error("Error executing command:", error);
+    }
+  });
+
+  console.log(
+    '\nStatus functions test commands available. Type "help" for a list of commands.'
   );
 
   return sock;
