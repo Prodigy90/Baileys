@@ -20,7 +20,6 @@ import makeWASocket, {
   getAggregateVotesInPollMessage
 } from "../src";
 //import MAIN_LOGGER from '../src/Utils/logger'
-import open from "open";
 import fs from "fs";
 import P from "pino";
 import qrcode from "qrcode-terminal";
@@ -242,11 +241,11 @@ const startSock = async () => {
 								  {}
 								)
 
-								
+
 								const chatId = onDemandMap.get(
 									historySyncNotification!.peerDataRequestSessionId!
 								)
-								
+
 								console.log(messages)
 
 							  onDemandMap.delete(
@@ -365,6 +364,56 @@ const startSock = async () => {
         // console.log("chats deleted ", events["chats.delete"]);
       }
     }
+  );
+
+  // Add a command handler for testing status functions
+  rl.on("line", async (line) => {
+    const [command, ...args] = line.trim().split(" ");
+
+    try {
+      switch (command) {
+        case "status":
+          // Get recent status updates
+          const statuses = await store.getRecentStatusUpdates({ limit: 5 });
+          console.log(`Retrieved ${statuses.length} recent status updates:`);
+          statuses.forEach((status, i) => {
+            console.log(
+              `${i + 1}. ID: ${status.key?.id}, Views: ${
+                (status as any).view_count
+              }, Type: ${
+                (status as any).media_type || (status as any).message_type
+              }`
+            );
+          });
+          break;
+
+        case "cleanup":
+          // Run status cleanup
+          const viewerDays = parseInt(args[0] || "7");
+          const countDays = parseInt(args[1] || "30");
+          console.log(
+            `Running cleanup (viewers: ${viewerDays} days, counts: ${countDays} days)...`
+          );
+          await store.cleanupStatusData(viewerDays, countDays);
+          console.log("Cleanup completed");
+          break;
+
+        case "help":
+          console.log("Available commands:");
+          console.log("  status - Show recent status updates");
+          console.log(
+            "  cleanup [viewerDays] [countDays] - Run status cleanup"
+          );
+          console.log("  help - Show this help message");
+          break;
+      }
+    } catch (error) {
+      console.error("Error executing command:", error);
+    }
+  });
+
+  console.log(
+    '\nStatus functions test commands available. Type "help" for a list of commands.'
   );
 
   return sock;

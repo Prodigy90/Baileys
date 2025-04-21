@@ -283,8 +283,8 @@ export type MediaDecryptionKeyInfo = {
 export type MinimalMessage = Pick<proto.IWebMessageInfo, 'key' | 'messageTimestamp'>
 
 export const messageTypeMap: Record<string, string> = {
-  extendedTextMessage: "text",
-  audioMessage: "audio",
-  videoMessage: "video",
-  imageMessage: "image"
-};
+	extendedTextMessage: 'text',
+	audioMessage: 'audio',
+	videoMessage: 'video',
+	imageMessage: 'image'
+}

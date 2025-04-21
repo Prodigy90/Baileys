@@ -1,17 +1,17 @@
+import pino from "pino";
+import { Pool } from "mysql2/promise";
+import { proto } from "../../WAProto";
+import type makeMDSocket from "../Socket";
+import { OptimizedMySQLStore } from "./optimized-mysql-store";
 import {
   Chat,
   Contact,
   GroupMetadata,
   ConnectionState,
   GroupMetadataRow,
-  GroupMetadataResult,
   BaileysEventEmitter,
+  GroupMetadataResult
 } from "../Types";
-import pino from "pino";
-import { proto } from "../../WAProto";
-import { Pool } from "mysql2/promise";
-import type makeMDSocket from "../Socket";
-import { OptimizedMySQLStore } from "./optimized-mysql-store";
 
 type WASocket = ReturnType<typeof makeMDSocket>;
 
@@ -31,7 +31,10 @@ interface makeMySQLStoreFunc {
   getContactById: (jid: string) => Promise<Contact | undefined>;
   getGroupByJid: (jid: string) => Promise<GroupMetadataRow | undefined>;
   removeAllData: () => Promise<void>;
-  getRecentStatusUpdates: () => Promise<proto.IWebMessageInfo[]>;
+  getRecentStatusUpdates: (options?: {
+    limit?: number;
+    offset?: number;
+  }) => Promise<proto.IWebMessageInfo[]>;
   fetchGroupMetadata: (
     jid: string,
     sock: WASocket | undefined
@@ -42,6 +45,11 @@ interface makeMySQLStoreFunc {
     json: any
   ) => Promise<{ totalChatsAffected: number; totalContactsAffected: number }>;
   storeUserData: (jid: string, username: string | null) => Promise<void>;
+  storeStatusUpdate: (message: proto.IWebMessageInfo) => Promise<boolean>;
+  cleanupStatusData: (
+    viewerRetentionDays?: number,
+    countRetentionDays?: number
+  ) => Promise<void>;
 }
 
 export function makeMySQLStore(
@@ -50,7 +58,9 @@ export function makeMySQLStore(
   skippedGroups: string[],
   logger?: pino.Logger
 ): makeMySQLStoreFunc {
-  if (!pool) throw new Error("No MySQL connection pool provided");
+  if (!pool) {
+    throw new Error("No MySQL connection pool provided");
+  }
 
   const log = logger || pino({ level: "info" });
   const store = new OptimizedMySQLStore(pool, log, instance_id, skippedGroups);
@@ -66,6 +76,19 @@ export function makeMySQLStore(
         view_count INT DEFAULT 0,
         status_message JSON,
         INDEX idx_instance_date (instance_id, post_date),
+        INDEX idx_post_date (post_date),
+        UNIQUE(instance_id, status_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
+
+      `CREATE TABLE IF NOT EXISTS status_view_counts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        instance_id VARCHAR(255) NOT NULL,
+        status_id VARCHAR(255) NOT NULL,
+        media_type VARCHAR(50) NOT NULL,
+        total_views INT DEFAULT 0,
+        last_updated DATETIME NOT NULL,
+        INDEX idx_instance_status (instance_id, status_id),
+        INDEX idx_cleanup (last_updated),
         UNIQUE(instance_id, status_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
 
@@ -165,7 +188,7 @@ export function makeMySQLStore(
         jid VARCHAR(255) NULL,
         INDEX idx_instance_jid (instance_id, jid),
         UNIQUE(instance_id, jid, username)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`
     ];
 
     for (const query of schema) {
@@ -197,10 +220,12 @@ export function makeMySQLStore(
     getAllContacts: store.getAllContacts.bind(store),
     getContactById: store.getContactById.bind(store),
     clearGroupsData: store.clearGroupsData.bind(store),
+    storeStatusUpdate: store.storeStatusUpdate.bind(store),
+    cleanupStatusData: store.cleanupStatusData.bind(store),
     fetchGroupMetadata: store.fetchGroupMetadata.bind(store),
     getAllSavedContacts: store.getAllSavedContacts.bind(store),
     loadAllGroupsMetadata: store.loadAllGroupsMetadata.bind(store),
     getRecentStatusUpdates: store.getRecentStatusUpdates.bind(store),
-    fetchAllGroupsMetadata: store.fetchAllGroupsMetadata.bind(store),
+    fetchAllGroupsMetadata: store.fetchAllGroupsMetadata.bind(store)
   };
 }
