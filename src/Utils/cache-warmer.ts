@@ -1,6 +1,6 @@
+import pino from 'pino'
 import { LRUCache } from 'lru-cache'
 import { Pool } from 'mysql2/promise'
-import pino from 'pino'
 
 export class CacheWarmer {
 	private warmupInterval: NodeJS.Timeout | null = null

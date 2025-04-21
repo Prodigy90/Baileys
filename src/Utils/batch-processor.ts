@@ -1,6 +1,6 @@
+import pino from 'pino'
 import { LRUCache } from 'lru-cache'
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
-import pino from 'pino'
 
 interface BatchItem {
   priority: number
