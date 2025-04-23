@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { Boom } from "@hapi/boom";
-import NodeCache from "@cacheable/node-cache";
+import NodeCache from "node-cache";
 import readline from "readline";
 import makeWASocket, {
   proto,
