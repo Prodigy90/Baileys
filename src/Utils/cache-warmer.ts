@@ -1,6 +1,21 @@
 import { LRUCache } from 'lru-cache'
-import { Pool } from 'mysql2/promise'
+import { Pool, RowDataPacket } from 'mysql2/promise'
 import pino from 'pino'
+
+interface GroupRow extends RowDataPacket {
+	jid: string
+	metadata: Record<string, unknown>
+}
+
+interface ContactRow extends RowDataPacket {
+	jid: string
+	contact: Record<string, unknown>
+}
+
+interface UserRow extends RowDataPacket {
+	username: string
+	jid: string
+}
 
 export class CacheWarmer {
 	private warmupInterval: NodeJS.Timeout | null = null
@@ -8,8 +23,8 @@ export class CacheWarmer {
 
 	constructor(
     private pool: Pool,
-    private cache: LRUCache<string, any>,
-    private instance_id: string,
+    private cache: LRUCache<string, Record<string, unknown>>,
+    private instanceId: string,
     private logger: pino.Logger,
     private warmupIntervalMs: number = 1000 * 60 * 30
 	) {}
@@ -57,16 +72,16 @@ export class CacheWarmer {
 
 	private async warmGroupMetadata() {
 		const query = `
-      SELECT jid, metadata 
-      FROM groups_metadata 
-      WHERE instance_id = ? 
+      SELECT jid, metadata
+      FROM groups_metadata
+      WHERE instance_id = ?
         AND participating = 1
       ORDER BY group_index ASC
     `
 
-		const [rows] = await this.pool.query(query, [this.instance_id])
-		for(const row of rows as any[]) {
-			const cacheKey = `group_${this.instance_id}_${row.jid}`
+		const [rows] = await this.pool.query<GroupRow[]>(query, [this.instanceId])
+		for(const row of rows) {
+			const cacheKey = `group_${this.instanceId}_${row.jid}`
 			this.cache.set(cacheKey, row.metadata, {
 				ttl: 1000 * 60 * 15,
 			})
@@ -75,16 +90,16 @@ export class CacheWarmer {
 
 	private async warmContacts() {
 		const query = `
-      SELECT jid, contact 
-      FROM contacts 
+      SELECT jid, contact
+      FROM contacts
       WHERE instance_id = ?
       ORDER BY JSON_EXTRACT(contact, '$.name') ASC
       LIMIT 1000
     `
 
-		const [rows] = await this.pool.query(query, [this.instance_id])
-		for(const row of rows as any[]) {
-			const cacheKey = `contact_${this.instance_id}_${row.jid}`
+		const [rows] = await this.pool.query<ContactRow[]>(query, [this.instanceId])
+		for(const row of rows) {
+			const cacheKey = `contact_${this.instanceId}_${row.jid}`
 			this.cache.set(cacheKey, row.contact, {
 				ttl: 1000 * 60 * 30,
 			})
@@ -93,14 +108,14 @@ export class CacheWarmer {
 
 	private async warmUserData() {
 		const query = `
-      SELECT username, jid 
-      FROM users 
+      SELECT username, jid
+      FROM users
       WHERE instance_id = ?
     `
 
-		const [rows] = await this.pool.query(query, [this.instance_id])
-		if(rows && (rows as any[]).length > 0) {
-			const cacheKey = `${this.instance_id}_user_cache`
+		const [rows] = await this.pool.query<UserRow[]>(query, [this.instanceId])
+		if(rows && rows.length > 0) {
+			const cacheKey = `${this.instanceId}_user_cache`
 			this.cache.set(cacheKey, rows[0], {
 				ttl: 1000 * 60 * 30,
 			})

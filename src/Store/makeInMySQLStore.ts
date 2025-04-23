@@ -19,7 +19,7 @@ interface makeMySQLStoreFunc {
   bind: (ev: BaileysEventEmitter) => Promise<void>
   loadMessage: (id: string) => Promise<proto.IWebMessageInfo | undefined>
   loadAllGroupsMetadata: () => Promise<GroupMetadata[]>
-  customQuery: (query: string, params?: any[]) => Promise<any>
+  customQuery: (query: string, params?: unknown[]) => Promise<unknown>
   getAllChats: () => Promise<Chat[]>
   getAllContacts: () => Promise<Contact[]>
   getAllSavedContacts: () => Promise<Contact[]>
@@ -39,9 +39,9 @@ interface makeMySQLStoreFunc {
     sock: WASocket | undefined
   ) => Promise<GroupMetadata | null>
   clearGroupsData: () => Promise<void>
-  toJSON: () => Promise<any>
+  toJSON: () => Promise<Record<string, unknown>>
   fromJSON: (
-    json: any
+    json: Record<string, unknown>
   ) => Promise<{ totalChatsAffected: number, totalContactsAffected: number }>
   storeUserData: (jid: string, username: string | null) => Promise<void>
   storeStatusUpdate: (message: proto.IWebMessageInfo) => Promise<boolean>
@@ -52,7 +52,7 @@ interface makeMySQLStoreFunc {
 }
 
 export function makeMySQLStore(
-	instance_id: string,
+	instanceId: string,
 	pool: Pool,
 	skippedGroups: string[],
 	logger?: pino.Logger
@@ -62,7 +62,7 @@ export function makeMySQLStore(
 	}
 
 	const log = logger || pino({ level: 'info' })
-	const store = new OptimizedMySQLStore(pool, log, instance_id, skippedGroups)
+	const store = new OptimizedMySQLStore(pool, log, instanceId, skippedGroups)
 
 	const createTables = async() => {
 		const schema = [
