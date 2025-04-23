@@ -55,3 +55,67 @@ export interface GroupModificationResponse {
     status: number
     participants?: { [key: string]: {} }
 }
+
+export interface GroupMetadataRow {
+  subject: string
+  is_admin: boolean
+  group_index: number
+  admin_index: number
+  participating: boolean
+  metadata: GroupMetadata
+}
+
+export interface GroupMetadataEntry {
+  id: string
+  subject: string
+  isAdmin: boolean
+  groupIndex: number
+  adminIndex: number
+  metadata: GroupMetadata
+}
+
+export interface GroupMetadataResult {
+  allGroups: {
+    id: string
+    subject: string
+    groupIndex: number
+  }[]
+  adminGroups: {
+    id: string
+    subject: string
+    adminIndex: number
+    participants: string[]
+  }[]
+}
+
+export interface GroupMetadataRow {
+  subject: string
+  is_admin: boolean
+  group_index: number
+  admin_index: number
+  participating: boolean
+  metadata: GroupMetadata
+}
+
+export interface GroupMetadataEntry {
+  id: string
+  subject: string
+  isAdmin: boolean
+  groupIndex: number
+  adminIndex: number
+  metadata: GroupMetadata
+}
+
+export interface GroupMetadataResult {
+  allGroups: {
+    id: string
+    subject: string
+    groupIndex: number
+  }[]
+  adminGroups: {
+    id: string
+    subject: string
+    adminIndex: number
+    participants: string[]
+  }[]
+}
