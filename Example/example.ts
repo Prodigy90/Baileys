@@ -145,7 +145,8 @@ const startSock = async () => {
         } else if (connection === "open") {
           await store.storeUserData(
             jidNormalizedUser(sock.user?.id),
-            sock.user?.name as string
+            sock.user?.name as string,
+            jidNormalizedUser(sock.user?.lid) as string
           ); //STORE USER DETAILS IN STORE
           console.log("opened connection");
         }
