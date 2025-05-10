@@ -43,7 +43,8 @@ interface makeMySQLStoreFunc {
   fromJSON: (
     json: Record<string, unknown>
   ) => Promise<{ totalChatsAffected: number, totalContactsAffected: number }>
-  storeUserData: (jid: string, username: string | null) => Promise<void>
+  storeUserData: (jid: string, username: string | null, lid?: string | null) => Promise<void>
+  getUserLid: () => Promise<string | null>
   storeStatusUpdate: (message: proto.IWebMessageInfo) => Promise<boolean>
   cleanupStatusData: (
     viewerRetentionDays?: number,
@@ -63,6 +64,30 @@ export function makeMySQLStore(
 
 	const log = logger || pino({ level: 'info' })
 	const store = new OptimizedMySQLStore(pool, log, instanceId, skippedGroups)
+
+	const checkAndUpdateSchema = async() => {
+		// Check if lid column exists in users table
+		try {
+			const [columns] = await pool.query(
+				`SELECT COLUMN_NAME
+				FROM INFORMATION_SCHEMA.COLUMNS
+				WHERE TABLE_SCHEMA = DATABASE()
+				AND TABLE_NAME = 'users'
+				AND COLUMN_NAME = 'lid'`
+			)
+
+			if(Array.isArray(columns) && columns.length === 0) {
+				log.info('Adding lid column to users table')
+				await pool.query(
+					`ALTER TABLE users
+					ADD COLUMN lid VARCHAR(255) NULL`
+				)
+				log.info('Successfully added lid column to users table')
+			}
+		} catch(error) {
+			log.error({ error }, 'Failed to check or update users table schema')
+		}
+	}
 
 	const createTables = async() => {
 		const schema = [
@@ -185,6 +210,7 @@ export function makeMySQLStore(
         instance_id VARCHAR(255) NOT NULL,
         username VARCHAR(255) NULL,
         jid VARCHAR(255) NULL,
+        lid VARCHAR(255) NULL,
         INDEX idx_instance_jid (instance_id, jid),
         UNIQUE(instance_id, jid, username)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`
@@ -200,14 +226,17 @@ export function makeMySQLStore(
 		}
 	}
 
-	createTables().catch((err) => log.error({ err }, 'Failed to create database tables')
-	)
+	// First create tables, then check and update schema if needed
+	createTables()
+		.then(() => checkAndUpdateSchema())
+		.catch((err) => log.error({ err }, 'Failed to create or update database tables'))
 
 	return {
 		state: store.state,
 		bind: store.bind.bind(store),
 		toJSON: store.toJSON.bind(store),
 		fromJSON: store.fromJSON.bind(store),
+		getUserLid: store.getUserLid.bind(store),
 		loadMessage: store.loadMessage.bind(store),
 		customQuery: store.customQuery.bind(store),
 		getAllChats: store.getAllChats.bind(store),

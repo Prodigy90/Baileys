@@ -642,8 +642,13 @@ export class OptimizedMySQLStore {
       `${this.instance_id}_user_cache`,
       "SELECT * FROM users WHERE instance_id = ?",
       [this.instance_id],
-      (row) => ({ username: row.username, jid: row.jid })
+      (row) => ({ username: row.username, jid: row.jid, lid: row.lid })
     );
+  }
+
+  async getUserLid(): Promise<string | null> {
+    const userData = await this.getUserData();
+    return userData?.lid || null;
   }
 
   async isUserGroupAdmin(id: string): Promise<Boolean> {
@@ -665,7 +670,7 @@ export class OptimizedMySQLStore {
 
     return participants.some(
       (participant) =>
-        participant.id === userData.jid &&
+        (participant.id === userData.jid || (userData.lid && participant.id === userData.lid)) &&
         (participant.admin === "superadmin" || participant.admin === "admin")
     );
   }
@@ -731,21 +736,21 @@ export class OptimizedMySQLStore {
     }
   }
 
-  async storeUserData(jid: string, username: string | null): Promise<void> {
+  async storeUserData(jid: string, username: string | null, lid: string | null = null): Promise<void> {
     try {
       const userSQL = `
-      INSERT INTO users (instance_id, jid, username)
-      VALUES (?, ?, ?)
-      ON DUPLICATE KEY UPDATE username = VALUES(username)`;
-      await this.customQuery(userSQL, [this.instance_id, jid, username]);
+      INSERT INTO users (instance_id, jid, username, lid)
+      VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE username = VALUES(username), lid = VALUES(lid)`;
+      await this.customQuery(userSQL, [this.instance_id, jid, username, lid]);
       this.logger.info(
-        { jid, username },
+        { jid, username, lid },
         "User data stored/updated successfully"
       );
 
       this.cache.delete(`${this.instance_id}_user_cache`);
     } catch (error) {
-      this.logger.error({ error, jid }, "Failed to insert/update user data");
+      this.logger.error({ error, jid, lid }, "Failed to insert/update user data");
     }
   }
 
@@ -1607,14 +1612,13 @@ export class OptimizedMySQLStore {
           return;
         }
 
-        const [{ jid }, is_group_admin] = await Promise.all([
-          this.getUserData(),
-          this.isUserGroupAdmin(id)
-        ]);
+        const userData = await this.getUserData();
+        const is_group_admin = await this.isUserGroupAdmin(id);
+        const jid = userData?.jid;
 
         if (
           !is_group_admin &&
-          !(participants.includes(jid) && action === "promote")
+          !((participants.includes(jid) || (userData?.lid && participants.includes(userData.lid))) && action === "promote")
         ) {
           return;
         }
@@ -1680,7 +1684,7 @@ export class OptimizedMySQLStore {
               (participant) => !participants.includes(participant.id)
             );
 
-            if (participants.includes(jid)) {
+            if (participants.includes(jid) || (userData.lid && participants.includes(userData.lid))) {
               participating = false;
               is_admin = false;
             }

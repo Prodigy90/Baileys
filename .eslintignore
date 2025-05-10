@@ -10,3 +10,4 @@ Example/Example.ts
 docs
 /src/store*
 /src/utils*
+src/Store/optimized-mysql-store.ts
