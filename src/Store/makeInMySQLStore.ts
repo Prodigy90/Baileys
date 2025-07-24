@@ -1,6 +1,6 @@
 import { type Pool } from 'mysql2/promise'
 import pino from 'pino'
-import { proto } from '../../WAProto'
+import { proto } from '../../WAProto/index.js'
 import type makeMDSocket from '../Socket'
 import {
 	type BaileysEventEmitter,
