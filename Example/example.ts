@@ -16,7 +16,7 @@ import makeWASocket, {
   jidNormalizedUser,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
-  makeCacheableSignalKeyStore,
+  jidDecode, makeCacheableSignalKeyStore, normalizeMessageContent, PatchedMessageWithRecipientJID,
   getAggregateVotesInPollMessage
 } from "../src";
 //import MAIN_LOGGER from '../src/Utils/logger'
@@ -84,7 +84,6 @@ const startSock = async () => {
   const sock = makeWASocket({
     version,
     logger,
-    printQRInTerminal: !usePairingCode,
     auth: {
       creds: state.creds,
       /** caching makes the store faster to send/recv messages */
@@ -219,93 +218,38 @@ const startSock = async () => {
         );
       }
 
-      // received a new message
-      if (events["messages.upsert"]) {
-        const upsert = events["messages.upsert"];
-        // console.log("recv messages ", JSON.stringify(upsert, undefined, 2));
+			// received a new message
+      if (events['messages.upsert']) {
+        const upsert = events['messages.upsert']
+        console.log('recv messages ', JSON.stringify(upsert, undefined, 2))
 
-        if (upsert.type === "notify") {
+        if (!!upsert.requestId) {
+          console.log("placeholder message received for request of id=" + upsert.requestId, upsert)
+        }
+
+
+
+        if (upsert.type === 'notify') {
           for (const msg of upsert.messages) {
-            //TODO: More built-in implementation of this
-            /* if (
-							msg.message?.protocolMessage?.type ===
-							proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION
-						  ) {
-							const historySyncNotification = getHistoryMsg(msg.message)
-							if (
-							  historySyncNotification?.syncType ==
-							  proto.HistorySync.HistorySyncType.ON_DEMAND
-							) {
-							  const { messages } =
-								await downloadAndProcessHistorySyncNotification(
-								  historySyncNotification,
-								  {}
-								)
-
-
-								const chatId = onDemandMap.get(
-									historySyncNotification!.peerDataRequestSessionId!
-								)
-
-								console.log(messages)
-
-							  onDemandMap.delete(
-								historySyncNotification!.peerDataRequestSessionId!
-							  )
-
-							  /*
-								// 50 messages is the limit imposed by whatsapp
-								//TODO: Add ratelimit of 7200 seconds
-								//TODO: Max retries 10
-								const messageId = await sock.fetchMessageHistory(
-									50,
-									oldestMessageKey,
-									oldestMessageTimestamp
-								)
-								onDemandMap.set(messageId, chatId)
-							}
-						  } */
-
-            if (
-              msg.message?.conversation ||
-              msg.message?.extendedTextMessage?.text
-            ) {
-              const text =
-                msg.message?.conversation ||
-                msg.message?.extendedTextMessage?.text;
+            if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
+              const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text
               if (text == "requestPlaceholder" && !upsert.requestId) {
-                const messageId = await sock.requestPlaceholderResend(msg.key);
-                console.log("requested placeholder resync, id=", messageId);
-              } else if (upsert.requestId) {
-                console.log(
-                  "Message received from phone, id=",
-                  upsert.requestId,
-                  msg
-                );
+                const messageId = await sock.requestPlaceholderResend(msg.key)
+                console.log('requested placeholder resync, id=', messageId)
               }
 
               // go to an old chat and send this
               if (text == "onDemandHistSync") {
-                const messageId = await sock.fetchMessageHistory(
-                  50,
-                  msg.key,
-                  msg.messageTimestamp!
-                );
-                console.log("requested on-demand sync, id=", messageId);
+                const messageId = await sock.fetchMessageHistory(50, msg.key, msg.messageTimestamp!)
+                console.log('requested on-demand sync, id=', messageId)
               }
-            }
 
-            if (
-              !msg.key.fromMe &&
-              doReplies &&
-              !isJidNewsletter(msg.key?.remoteJid!)
-            ) {
-              console.log("replying to", msg.key.remoteJid);
-              await sock!.readMessages([msg.key]);
-              await sendMessageWTyping(
-                { text: "Hello there!" },
-                msg.key.remoteJid!
-              );
+              if (!msg.key.fromMe && doReplies && !isJidNewsletter(msg.key?.remoteJid!)) {
+
+                console.log('replying to', msg.key.remoteJid)
+                await sock!.readMessages([msg.key])
+                await sendMessageWTyping({ text: 'Hello there!' }, msg.key.remoteJid!)
+              }
             }
           }
         }
@@ -427,9 +371,9 @@ const startSock = async () => {
       return msg?.message || undefined;
     }
 
-    // only if store is present
-    return proto.Message.fromObject({});
-  }
-};
+		// only if store is present
+		return proto.Message.fromObject({ conversation: 'test' })
+	}
+}
 
 startSock();

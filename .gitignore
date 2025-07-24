@@ -21,3 +21,4 @@ wa-logs.txt
 package-lock.json
 yarn.lock
 Example/status-test.ts
+.eslintignore
