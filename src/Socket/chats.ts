@@ -355,8 +355,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		})
 
 		const listNode = getBinaryNodeChild(result, 'list')
-		return getBinaryNodeChildren(listNode, 'item')
-			.map(n => n.attrs.jid)
+		return getBinaryNodeChildren(listNode, 'item').map(n => n.attrs.jid)
 	}
 
 	const updateBlockStatus = async (jid: string, action: 'block' | 'unblock') => {
@@ -1097,7 +1096,6 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		profilePictureUrl,
 		onWhatsApp,
 		fetchBlocklist,
-		fetchStatusPrivacy,
 		fetchStatus,
 		fetchDisappearingDuration,
 		updateProfilePicture,

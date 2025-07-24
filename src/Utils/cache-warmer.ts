@@ -1,5 +1,5 @@
 import { LRUCache } from 'lru-cache'
-import { Pool, RowDataPacket } from 'mysql2/promise'
+import { type Pool, type RowDataPacket } from 'mysql2/promise'
 import pino from 'pino'
 
 interface GroupRow extends RowDataPacket {
@@ -22,11 +22,11 @@ export class CacheWarmer {
 	private isWarming = false
 
 	constructor(
-    private pool: Pool,
-    private cache: LRUCache<string, Record<string, unknown>>,
-    private instanceId: string,
-    private logger: pino.Logger,
-    private warmupIntervalMs: number = 1000 * 60 * 30
+		private pool: Pool,
+		private cache: LRUCache<string, Record<string, unknown>>,
+		private instanceId: string,
+		private logger: pino.Logger,
+		private warmupIntervalMs: number = 1000 * 60 * 30
 	) {}
 
 	async start() {
@@ -34,15 +34,14 @@ export class CacheWarmer {
 
 		await this.warmCache()
 		this.warmupInterval = setInterval(() => {
-			this.warmCache().catch((err) => this.logger.error({ err }, 'Cache warming interval failed')
-			)
+			this.warmCache().catch(err => this.logger.error({ err }, 'Cache warming interval failed'))
 		}, this.warmupIntervalMs)
 
 		this.logger.info('Cache warming started')
 	}
 
 	stop() {
-		if(this.warmupInterval) {
+		if (this.warmupInterval) {
 			clearInterval(this.warmupInterval)
 			this.warmupInterval = null
 			this.logger.info('Cache warming stopped')
@@ -50,20 +49,16 @@ export class CacheWarmer {
 	}
 
 	private async warmCache() {
-		if(this.isWarming) {
+		if (this.isWarming) {
 			this.logger.debug('Cache warming already in progress')
 			return
 		}
 
 		this.isWarming = true
 		try {
-			await Promise.all([
-				this.warmGroupMetadata(),
-				this.warmContacts(),
-				this.warmUserData(),
-			])
+			await Promise.all([this.warmGroupMetadata(), this.warmContacts(), this.warmUserData()])
 			this.logger.info('Cache warming completed successfully')
-		} catch(error) {
+		} catch (error) {
 			this.logger.error({ error }, 'Cache warming failed')
 		} finally {
 			this.isWarming = false
@@ -80,10 +75,10 @@ export class CacheWarmer {
     `
 
 		const [rows] = await this.pool.query<GroupRow[]>(query, [this.instanceId])
-		for(const row of rows) {
+		for (const row of rows) {
 			const cacheKey = `group_${this.instanceId}_${row.jid}`
 			this.cache.set(cacheKey, row.metadata, {
-				ttl: 1000 * 60 * 15,
+				ttl: 1000 * 60 * 15
 			})
 		}
 	}
@@ -98,10 +93,10 @@ export class CacheWarmer {
     `
 
 		const [rows] = await this.pool.query<ContactRow[]>(query, [this.instanceId])
-		for(const row of rows) {
+		for (const row of rows) {
 			const cacheKey = `contact_${this.instanceId}_${row.jid}`
 			this.cache.set(cacheKey, row.contact, {
-				ttl: 1000 * 60 * 30,
+				ttl: 1000 * 60 * 30
 			})
 		}
 	}
@@ -114,10 +109,10 @@ export class CacheWarmer {
     `
 
 		const [rows] = await this.pool.query<UserRow[]>(query, [this.instanceId])
-		if(rows && rows.length > 0) {
+		if (rows && rows.length > 0) {
 			const cacheKey = `${this.instanceId}_user_cache`
 			this.cache.set(cacheKey, rows[0], {
-				ttl: 1000 * 60 * 30,
+				ttl: 1000 * 60 * 30
 			})
 		}
 	}

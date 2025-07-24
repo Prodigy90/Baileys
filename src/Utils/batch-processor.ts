@@ -1,11 +1,11 @@
 import pino from 'pino'
 import { LRUCache } from 'lru-cache'
-import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
+import { type Pool, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise'
 
 interface BatchItem {
-  priority: number
-  tableName: string
-  data: Record<string, any>
+	priority: number
+	tableName: string
+	data: Record<string, any>
 }
 
 class PriorityQueue<T> {
@@ -13,15 +13,15 @@ class PriorityQueue<T> {
 
 	enqueue(item: T & { priority: number }): void {
 		let added = false
-		for(let i = 0; i < this.items.length; i++) {
-			if((this.items[i] as any).priority > item.priority) {
+		for (let i = 0; i < this.items.length; i++) {
+			if ((this.items[i] as any).priority > item.priority) {
 				this.items.splice(i, 0, item)
 				added = true
 				break
 			}
 		}
 
-		if(!added) {
+		if (!added) {
 			this.items.push(item)
 		}
 	}
@@ -45,31 +45,30 @@ export class BatchProcessor {
 	private readonly BATCH_SIZE = 100
 	private readonly PROCESS_INTERVAL = 5000
 
-	constructor(private pool: Pool, private log: pino.Logger) {
+	constructor(
+		private pool: Pool,
+		private log: pino.Logger
+	) {
 		this.startProcessor()
 	}
 
-	public queueItem(
-		tableName: string,
-		data: Record<string, any>,
-		priority = 1
-	): void {
-		if(!this.queues.has(tableName)) {
+	public queueItem(tableName: string, data: Record<string, any>, priority = 1): void {
+		if (!this.queues.has(tableName)) {
 			this.queues.set(tableName, new PriorityQueue<BatchItem>())
 		}
 
-    this.queues.get(tableName)!.enqueue({
-    	priority,
-    	tableName,
-    	data,
-    })
+		this.queues.get(tableName)!.enqueue({
+			priority,
+			tableName,
+			data
+		})
 
 		// Track queue size for debugging if needed
 		// const currentQueueSize = this.queues.get(tableName)?.size() || 0;
 	}
 
 	private async processBatch(): Promise<void> {
-		if(this.processing) {
+		if (this.processing) {
 			return
 		}
 
@@ -77,66 +76,66 @@ export class BatchProcessor {
 		let retries = 3
 
 		try {
-			while(retries > 0) {
+			while (retries > 0) {
 				const conn = await this.pool.getConnection()
 
 				try {
 					await conn.beginTransaction()
 
-					for(const [tableName, queue] of this.queues.entries()) {
+					for (const [tableName, queue] of this.queues.entries()) {
 						const batch: BatchItem[] = []
 						const failedItems: BatchItem[] = []
 
-						while(!queue.isEmpty() && batch.length < this.BATCH_SIZE) {
+						while (!queue.isEmpty() && batch.length < this.BATCH_SIZE) {
 							const item = queue.dequeue()
-							if(item) {
+							if (item) {
 								batch.push(item)
 							}
 						}
 
-						if(batch.length > 0) {
+						if (batch.length > 0) {
 							try {
 								await this.executeBatchUpsert(
 									conn,
 									tableName,
-									batch.map((b) => b.data)
+									batch.map(b => b.data)
 								)
-							} catch(error) {
-								batch.forEach((item) => failedItems.push(item))
+							} catch (error) {
+								batch.forEach(item => failedItems.push(item))
 								throw error
 							}
 						}
 
-						failedItems.forEach((item) => queue.enqueue(item))
+						failedItems.forEach(item => queue.enqueue(item))
 					}
 
 					await conn.commit()
 					break
-				} catch(error) {
+				} catch (error) {
 					await conn.rollback()
 					retries--
 
 					this.log.error(
 						{
 							error,
-							retriesLeft: retries,
+							retriesLeft: retries
 						},
 						'Batch processing failed, retrying...'
 					)
 
-					if(retries === 0) {
+					if (retries === 0) {
 						throw error
 					}
 
-					await new Promise((resolve) => setTimeout(resolve, 1000))
+					await new Promise(resolve => setTimeout(resolve, 1000))
 				} finally {
 					conn.release()
 				}
 			}
-		} catch(error) {
+		} catch (error) {
 			this.log.error(
 				{
-					error,
+					error
 				},
 				'Batch processing failed after all retries'
 			)
@@ -147,10 +146,10 @@ export class BatchProcessor {
 	}
 
 	/**
-   * Get a unique key for a batch item
-   * This is used for deduplication but currently not actively used
-   * Keeping for future reference
-   */
+	 * Get a unique key for a batch item
+	 * This is used for deduplication but currently not actively used
+	 * Keeping for future reference
+	 */
 	/*
   private getBatchKey(tableName: string, data: Record<string, any>): string {
     switch (tableName) {
@@ -166,18 +165,14 @@ export class BatchProcessor {
   }
   */
 
-	private async executeBatchUpsert(
-		conn: any,
-		tableName: string,
-		batch: Record<string, any>[]
-	) {
+	private async executeBatchUpsert(conn: any, tableName: string, batch: Record<string, any>[]) {
 		switch (tableName) {
-		case 'status_updates':
-			if(batch[0]?.view_count_increment) {
-				const statusIds = batch.map((item) => item.id)
-				const increments = batch.map((item) => item.view_count_increment)
+			case 'status_updates':
+				if (batch[0]?.view_count_increment) {
+					const statusIds = batch.map(item => item.id)
+					const increments = batch.map(item => item.view_count_increment)
 
-				const query = `
+					const query = `
             UPDATE status_updates
             SET view_count = view_count + CASE
               ${statusIds.map(() => 'WHEN status_id = ? THEN ?').join(' ')}
@@ -185,57 +180,43 @@ export class BatchProcessor {
             WHERE status_id IN (${statusIds.map(() => '?').join(',')})
           `
 
-				const values = [
-					...statusIds.flatMap((id, i) => [id, increments[i]]),
-					...statusIds,
-				]
+					const values = [...statusIds.flatMap((id, i) => [id, increments[i]]), ...statusIds]
 
-				await conn.query(query, values)
-				return
-			}
+					await conn.query(query, values)
+					return
+				}
 
-			try {
-				const columns = [
-					'instance_id',
-					'status_id',
-					'status_message',
-					'post_date',
-					'message_type',
-				]
+				try {
+					const columns = ['instance_id', 'status_id', 'status_message', 'post_date', 'message_type']
 
-				const rowPlaceholders = batch.map(() => '(?, ?, ?, ?, ?)').join(', ')
+					const rowPlaceholders = batch.map(() => '(?, ?, ?, ?, ?)').join(', ')
 
-				const updatePlaceholders = columns
-					.map((key) => `\`${key}\` = VALUES(\`${key}\`)`)
-					.join(', ')
+					const updatePlaceholders = columns.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(', ')
 
-				const query = `
+					const query = `
             INSERT INTO status_updates (${columns.join(', ')})
             VALUES ${rowPlaceholders}
             ON DUPLICATE KEY UPDATE ${updatePlaceholders}
           `
 
-				const values = batch.flatMap((item) => [
-					item.instance_id,
-					item.status_id,
-					JSON.stringify(item.status_message),
-					item.post_date,
-					item.message_type,
-				])
+					const values = batch.flatMap(item => [
+						item.instance_id,
+						item.status_id,
+						JSON.stringify(item.status_message),
+						item.post_date,
+						item.message_type
+					])
 
-				await conn.query(query, values)
-			} catch(error) {
-				this.log.error(
-					{ error },
-					'Failed to execute status_updates batch upsert'
-				)
-				throw error
-			}
+					await conn.query(query, values)
+				} catch (error) {
+					this.log.error({ error }, 'Failed to execute status_updates batch upsert')
+					throw error
+				}
 
-			return
+				return
 
-		case 'messages':
-			const query = `
+			case 'messages':
+				const query = `
         INSERT INTO messages (instance_id, message_id, message_data, post_date)
         VALUES ${batch.map(() => '(?, ?, ?, ?)').join(',')}
         ON DUPLICATE KEY UPDATE
@@ -245,30 +226,23 @@ export class BatchProcessor {
           post_date = VALUES(post_date)
       `
 
-			const values = batch.flatMap((item) => {
-				const message_data =
-            typeof item.message_data === 'object'
-            	? JSON.stringify(item.message_data)
-            	: item.message_data
+				const values = batch.flatMap(item => {
+					const message_data =
+						typeof item.message_data === 'object' ? JSON.stringify(item.message_data) : item.message_data
 
-				return [
-					item.instance_id,
-					item.message_id,
-					message_data,
-					item.post_date,
-				]
-			})
+					return [item.instance_id, item.message_id, message_data, item.post_date]
+				})
 
-			try {
-				await conn.query(query, values)
-			} catch(error) {
-				throw error
-			}
+				try {
+					await conn.query(query, values)
+				} catch (error) {
+					throw error
+				}
 
-			return
+				return
 
-		case 'contacts':
-			const contactQuery = `
+			case 'contacts':
+				const contactQuery = `
         INSERT INTO contacts (instance_id, jid, contact)
         VALUES ${batch.map(() => '(?, ?, ?)').join(',')}
         ON DUPLICATE KEY UPDATE
@@ -285,35 +259,27 @@ export class BatchProcessor {
           )
       `
 
-			const contactValues = batch.flatMap((item) => [
-				item.instance_id,
-				item.jid,
-				JSON.stringify(item.contact),
-			])
+				const contactValues = batch.flatMap(item => [item.instance_id, item.jid, JSON.stringify(item.contact)])
 
-			await conn.query(contactQuery, contactValues)
-			return
+				await conn.query(contactQuery, contactValues)
+				return
 
-		case 'chats':
-			const chatQuery = `
+			case 'chats':
+				const chatQuery = `
         INSERT INTO chats (instance_id, jid, chat)
         VALUES ${batch.map(() => '(?, ?, ?)').join(',')}
         ON DUPLICATE KEY UPDATE
          chat = VALUES(chat)
       `
 
-			const chatValues = batch.flatMap((item) => [
-				item.instance_id,
-				item.jid,
-				JSON.stringify(item.chat),
-			])
+				const chatValues = batch.flatMap(item => [item.instance_id, item.jid, JSON.stringify(item.chat)])
 
-			await conn.query(chatQuery, chatValues)
-			return
+				await conn.query(chatQuery, chatValues)
+				return
 
-		case 'groups_metadata':
-			if(batch[0].metadata) {
-				const groupQuery = `
+			case 'groups_metadata':
+				if (batch[0]?.metadata) {
+					const groupQuery = `
           INSERT INTO groups_metadata
             (instance_id, jid, subject, is_admin, participating, group_index, admin_index, metadata)
           VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(',')}
@@ -326,25 +292,25 @@ export class BatchProcessor {
             metadata = VALUES(metadata)
         `
 
-				const groupValues = batch.flatMap((item) => [
-					item.instance_id,
-					item.jid,
-					item.subject || '',
-					item.is_admin || false,
-					item.participating !== false,
-					item.group_index,
-					item.admin_index || 0,
-					JSON.stringify(item.metadata),
-				])
+					const groupValues = batch.flatMap(item => [
+						item.instance_id,
+						item.jid,
+						item.subject || '',
+						item.is_admin || false,
+						item.participating !== false,
+						item.group_index,
+						item.admin_index || 0,
+						JSON.stringify(item.metadata)
+					])
 
-				await conn.query(groupQuery, groupValues)
+					await conn.query(groupQuery, groupValues)
+					return
+				}
+
 				return
-			}
 
-			return
-
-		case 'status_viewers':
-			const viewerQuery = `
+			case 'status_viewers':
+				const viewerQuery = `
         INSERT INTO status_viewers
           (instance_id, status_id, viewer_jid, view_date)
         VALUES ${batch.map(() => '(?, ?, ?, ?)').join(',')}
@@ -352,24 +318,19 @@ export class BatchProcessor {
           view_date = VALUES(view_date)
       `
 
-			const viewerValues = batch.flatMap((item) => [
-				item.instance_id,
-				item.status_id,
-				item.viewer_jid,
-				item.view_date,
-			])
+				const viewerValues = batch.flatMap(item => [item.instance_id, item.status_id, item.viewer_jid, item.view_date])
 
-			await conn.query(viewerQuery, viewerValues)
-			return
+				await conn.query(viewerQuery, viewerValues)
+				return
 
-		case 'status_view_counts':
-			if(batch[0]?.total_views_increment) {
-				// Handle batch increment of view counts
-				const statusIds = batch.map((item) => item.status_id)
-				const increments = batch.map((item) => item.total_views_increment)
-				const lastUpdates = batch.map((item) => item.last_updated)
+			case 'status_view_counts':
+				if (batch[0]?.total_views_increment) {
+					// Handle batch increment of view counts
+					const statusIds = batch.map(item => item.status_id)
+					const increments = batch.map(item => item.total_views_increment)
+					const lastUpdates = batch.map(item => item.last_updated)
 
-				const incrementQuery = `
+					const incrementQuery = `
             UPDATE status_view_counts
             SET total_views = total_views + CASE
               ${statusIds.map(() => 'WHEN status_id = ? THEN ?').join(' ')}
@@ -380,16 +341,16 @@ export class BatchProcessor {
             WHERE status_id IN (${statusIds.map(() => '?').join(',')})
           `
 
-				const incrementValues = [
-					...statusIds.flatMap((id, i) => [id, increments[i]]),
-					...statusIds.flatMap((id, i) => [id, lastUpdates[i]]),
-					...statusIds,
-				]
+					const incrementValues = [
+						...statusIds.flatMap((id, i) => [id, increments[i]]),
+						...statusIds.flatMap((id, i) => [id, lastUpdates[i]]),
+						...statusIds
+					]
 
-				await conn.query(incrementQuery, incrementValues)
-			} else {
-				// Handle insert/update of view counts
-				const viewCountQuery = `
+					await conn.query(incrementQuery, incrementValues)
+				} else {
+					// Handle insert/update of view counts
+					const viewCountQuery = `
           INSERT INTO status_view_counts
             (instance_id, status_id, media_type, total_views, last_updated)
           VALUES ${batch.map(() => '(?, ?, ?, ?, ?)').join(',')}
@@ -399,18 +360,18 @@ export class BatchProcessor {
             last_updated = VALUES(last_updated)
           `
 
-				const viewCountValues = batch.flatMap((item) => [
-					item.instance_id,
-					item.status_id,
-					item.media_type,
-					item.total_views || 0,
-					item.last_updated,
-				])
+					const viewCountValues = batch.flatMap(item => [
+						item.instance_id,
+						item.status_id,
+						item.media_type,
+						item.total_views || 0,
+						item.last_updated
+					])
 
-				await conn.query(viewCountQuery, viewCountValues)
-			}
+					await conn.query(viewCountQuery, viewCountValues)
+				}
 
-			return
+				return
 		}
 	}
 
@@ -421,9 +382,9 @@ export class BatchProcessor {
 
 export class DbHelpers {
 	constructor(
-    private pool: Pool,
-    private log: pino.Logger,
-    private cache: LRUCache<string, any>
+		private pool: Pool,
+		private log: pino.Logger,
+		private cache: LRUCache<string, any>
 	) {}
 
 	async getFromCacheOrDb<T>(
@@ -432,38 +393,27 @@ export class DbHelpers {
 		params: any[],
 		transform: (row: RowDataPacket) => T
 	): Promise<T | null> {
-		if(this.cache.has(cacheKey)) {
+		if (this.cache.has(cacheKey)) {
 			return this.cache.get(cacheKey) as T
 		}
 
 		try {
 			const [rows] = await this.pool.query<RowDataPacket[]>(query, params)
-			if(rows.length === 0) {
+			if (rows.length === 0) {
 				return null
 			}
 
-			const result = transform(rows[0])
+			const result = transform(rows[0]!)
 			this.cache.set(cacheKey, result)
 			return result
-		} catch(error) {
+		} catch (error) {
 			this.log.error({ error, query }, 'Database query failed')
 			return null
 		}
 	}
 
-	async checkExists(
-		cacheKey: string,
-		query: string,
-		params: any[]
-	): Promise<boolean> {
-		return (
-			(await this.getFromCacheOrDb<boolean>(
-				cacheKey,
-				query,
-				params,
-				(row) => !!row
-			)) ?? false
-		)
+	async checkExists(cacheKey: string, query: string, params: any[]): Promise<boolean> {
+		return (await this.getFromCacheOrDb<boolean>(cacheKey, query, params, row => !!row)) ?? false
 	}
 
 	async batchQuery(
@@ -472,12 +422,9 @@ export class DbHelpers {
 		batchSize = 500
 	): Promise<Array<RowDataPacket[] | ResultSetHeader>> {
 		const results: Array<RowDataPacket[] | ResultSetHeader> = []
-		for(let i = 0; i < batchParams.length; i += batchSize) {
+		for (let i = 0; i < batchParams.length; i += batchSize) {
 			const batch = batchParams.slice(i, i + batchSize)
-			const [result] = await this.pool.query<RowDataPacket[] | ResultSetHeader>(
-				query,
-				[batch]
-			)
+			const [result] = await this.pool.query<RowDataPacket[] | ResultSetHeader>(query, [batch])
 			results.push(result)
 		}
 

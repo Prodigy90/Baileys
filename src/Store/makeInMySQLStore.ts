@@ -1,55 +1,47 @@
-import { Pool } from 'mysql2/promise'
+import { type Pool } from 'mysql2/promise'
 import pino from 'pino'
 import { proto } from '../../WAProto'
 import type makeMDSocket from '../Socket'
 import {
-	BaileysEventEmitter,
-	Chat,
-	ConnectionState,
-	Contact,
-	GroupMetadata,
-	GroupMetadataResult,
-	GroupMetadataRow } from '../Types'
+	type BaileysEventEmitter,
+	type Chat,
+	type ConnectionState,
+	type Contact,
+	type GroupMetadata,
+	type GroupMetadataResult,
+	type GroupMetadataRow
+} from '../Types'
 import { OptimizedMySQLStore } from './optimized-mysql-store'
 
-type WASocket = ReturnType<typeof makeMDSocket>;
+type WASocket = ReturnType<typeof makeMDSocket>
 
 interface makeMySQLStoreFunc {
-  state: ConnectionState | null
-  bind: (ev: BaileysEventEmitter) => Promise<void>
-  loadMessage: (id: string) => Promise<proto.IWebMessageInfo | undefined>
-  loadAllGroupsMetadata: () => Promise<GroupMetadata[]>
-  customQuery: (query: string, params?: unknown[]) => Promise<unknown>
-  getAllChats: () => Promise<Chat[]>
-  getAllContacts: () => Promise<Contact[]>
-  getAllSavedContacts: () => Promise<Contact[]>
-  fetchAllGroupsMetadata: (
-    sock: WASocket | undefined
-  ) => Promise<GroupMetadataResult>
-  getChatById: (jid: string) => Promise<Chat | undefined>
-  getContactById: (jid: string) => Promise<Contact | undefined>
-  getGroupByJid: (jid: string) => Promise<GroupMetadataRow | undefined>
-  removeAllData: () => Promise<void>
-  getRecentStatusUpdates: (options?: {
-    limit?: number
-    offset?: number
-  }) => Promise<proto.IWebMessageInfo[]>
-  fetchGroupMetadata: (
-    jid: string,
-    sock: WASocket | undefined
-  ) => Promise<GroupMetadata | null>
-  clearGroupsData: () => Promise<void>
-  toJSON: () => Promise<Record<string, unknown>>
-  fromJSON: (
-    json: Record<string, unknown>
-  ) => Promise<{ totalChatsAffected: number, totalContactsAffected: number }>
-  storeUserData: (jid: string, username: string | null, lid?: string | null) => Promise<void>
-  getUserLid: () => Promise<string | null>
-  storeStatusUpdate: (message: proto.IWebMessageInfo) => Promise<boolean>
-  cleanupStatusData: (
-    viewerRetentionDays?: number,
-    countRetentionDays?: number
-  ) => Promise<void>
+	state: ConnectionState | null
+	bind: (ev: BaileysEventEmitter) => Promise<void>
+	loadMessage: (id: string) => Promise<proto.IWebMessageInfo | undefined>
+	loadAllGroupsMetadata: () => Promise<GroupMetadata[]>
+	customQuery: (query: string, params?: unknown[]) => Promise<unknown>
+	getAllChats: () => Promise<Chat[]>
+	getAllContacts: () => Promise<Contact[]>
+	getAllSavedContacts: () => Promise<Contact[]>
+	fetchAllGroupsMetadata: (sock: WASocket | undefined) => Promise<GroupMetadataResult>
+	getChatById: (jid: string) => Promise<Chat | undefined>
+	getContactById: (jid: string) => Promise<Contact | undefined>
+	getGroupByJid: (jid: string) => Promise<GroupMetadataRow | null>
+	removeAllData: () => Promise<void>
+	getRecentStatusUpdates: (options?: { limit?: number; offset?: number }) => Promise<proto.IWebMessageInfo[]>
+	fetchGroupMetadata: (jid: string, sock: WASocket | undefined) => Promise<GroupMetadata | null>
+	clearGroupsData: () => Promise<void>
+	toJSON: () => Promise<Record<string, unknown>>
+	fromJSON: (json: {
+		chats: Chat[]
+		contacts: Contact[]
+		messages: { [id: string]: any[] }
+	}) => Promise<{ totalChatsAffected: number; totalContactsAffected: number }>
+	storeUserData: (jid: string, username: string | null, lid?: string | null) => Promise<void>
+	getUserLid: () => Promise<string | null>
+	storeStatusUpdate: (message: proto.IWebMessageInfo) => Promise<boolean>
+	cleanupStatusData: (viewerRetentionDays?: number, countRetentionDays?: number) => Promise<void>
 }
 
 export function makeMySQLStore(
@@ -58,14 +50,14 @@ export function makeMySQLStore(
 	skippedGroups: string[],
 	logger?: pino.Logger
 ): makeMySQLStoreFunc {
-	if(!pool) {
+	if (!pool) {
 		throw new Error('No MySQL connection pool provided')
 	}
 
 	const log = logger || pino({ level: 'info' })
 	const store = new OptimizedMySQLStore(pool, log, instanceId, skippedGroups)
 
-	const checkAndUpdateSchema = async() => {
+	const checkAndUpdateSchema = async () => {
 		// Check if lid column exists in users table
 		try {
 			const [columns] = await pool.query(
@@ -76,7 +68,7 @@ export function makeMySQLStore(
 				AND COLUMN_NAME = 'lid'`
 			)
 
-			if(Array.isArray(columns) && columns.length === 0) {
+			if (Array.isArray(columns) && columns.length === 0) {
 				log.info('Adding lid column to users table')
 				await pool.query(
 					`ALTER TABLE users
@@ -84,12 +76,12 @@ export function makeMySQLStore(
 				)
 				log.info('Successfully added lid column to users table')
 			}
-		} catch(error) {
+		} catch (error) {
 			log.error({ error }, 'Failed to check or update users table schema')
 		}
 	}
 
-	const createTables = async() => {
+	const createTables = async () => {
 		const schema = [
 			`CREATE TABLE IF NOT EXISTS status_updates (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -216,11 +208,11 @@ export function makeMySQLStore(
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`
 		]
 
-		for(const query of schema) {
+		for (const query of schema) {
 			try {
 				await pool.query(query)
 				log.info(`Schema operation executed: ${query.slice(0, 50)}...`)
-			} catch(error) {
+			} catch (error) {
 				log.error({ error, query }, 'Failed to execute schema operation')
 			}
 		}
@@ -229,7 +221,7 @@ export function makeMySQLStore(
 	// First create tables, then check and update schema if needed
 	createTables()
 		.then(() => checkAndUpdateSchema())
-		.catch((err) => log.error({ err }, 'Failed to create or update database tables'))
+		.catch(err => log.error({ err }, 'Failed to create or update database tables'))
 
 	return {
 		state: store.state,
